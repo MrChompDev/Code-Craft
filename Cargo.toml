@@ -1,0 +1,13 @@
+[package]
+name = "codecraft"
+version = "1.0.0"
+edition = "2021"
+description = "CodeCraft - a personal IntelliJ-inspired IDE"
+
+[dependencies]
+eframe = { version = "0.32", features = ["default"] }
+glow = "0.16"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 2
