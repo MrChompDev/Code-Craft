@@ -594,7 +594,6 @@ name = "codecraft"
 version = "1.0.0"
 dependencies = [
  "eframe",
- "glow",
  "image",
 ]
 
