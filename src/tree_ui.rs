@@ -40,7 +40,7 @@ pub fn draw(app: &mut App, ui: &mut egui::Ui) {
 
 fn quick_btn(
     ui: &mut egui::Ui,
-    id: &str,
+    _id: &str,
     tooltip: &str,
     paint: impl FnOnce(&egui::Painter, Pos2),
 ) -> bool {
@@ -197,7 +197,7 @@ fn entry_row(ui: &mut egui::Ui, depth: usize, name: &mut String) -> bool {
     p.rect_stroke(
         brect,
         3.0,
-        Stroke::new(1.0, ACCENT),
+        Stroke::new(1.0_f32, ACCENT),
         egui::StrokeKind::Inside,
     );
 

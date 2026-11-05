@@ -22,7 +22,6 @@ pub const BORDER2: Color32 = Color32::from_rgb(0x43, 0x45, 0x4A);
 pub const ACTIVE_LINE: Color32 = Color32::from_rgb(0x28, 0x2A, 0x2E);
 pub const GUTTER_NUM: Color32 = Color32::from_rgb(0x4B, 0x50, 0x59);
 pub const GUTTER_NUM_CUR: Color32 = Color32::from_rgb(0x9D, 0xA0, 0xA8);
-pub const FOLD_DOTS: Color32 = Color32::from_rgb(0x6F, 0x73, 0x7A);
 
 // Syntax colors (new-UI dark)
 pub const SYN_KW: Color32 = Color32::from_rgb(0xCF, 0x8E, 0x6D);
@@ -31,7 +30,6 @@ pub const SYN_NUM: Color32 = Color32::from_rgb(0x2A, 0xAC, 0xB8);
 pub const SYN_COM: Color32 = Color32::from_rgb(0x7A, 0x7E, 0x85);
 pub const SYN_FN: Color32 = Color32::from_rgb(0x56, 0xA8, 0xF5);
 pub const SYN_TYPE: Color32 = Color32::from_rgb(0xC7, 0x7D, 0xBB);
-pub const SYN_FIELD: Color32 = Color32::from_rgb(0x98, 0x76, 0xAA);
 pub const SYN_PLAIN: Color32 = Color32::from_rgb(0xBC, 0xBE, 0xC4);
 pub const SYN_TAG: Color32 = Color32::from_rgb(0xCF, 0x8E, 0x6D);
 pub const SYN_ATTR: Color32 = Color32::from_rgb(0xC7, 0x7D, 0xBB);
@@ -67,7 +65,7 @@ pub fn apply(ctx: &egui::Context) {
         v.selection.bg_fill = SEL_BLUE;
         v.selection.stroke = Stroke::NONE;
         v.hyperlink_color = ACCENT;
-        v.window_stroke = Stroke::new(1.0, BORDER2);
+        v.window_stroke = Stroke::new(1.0_f32, BORDER2);
         v.window_corner_radius = CornerRadius::same(6);
         v.popup_shadow = Default::default();
         v.window_shadow = Default::default();
@@ -77,17 +75,17 @@ pub fn apply(ctx: &egui::Context) {
         v.widgets.hovered.corner_radius = r;
         v.widgets.active.corner_radius = r;
         v.widgets.noninteractive.bg_fill = PANEL_BG;
-        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
-        v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT2);
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+        v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT2);
         v.widgets.inactive.bg_fill = Color32::TRANSPARENT;
         v.widgets.inactive.bg_stroke = Stroke::NONE;
-        v.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT2);
+        v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT2);
         v.widgets.hovered.bg_fill = HOVER;
         v.widgets.hovered.bg_stroke = Stroke::NONE;
-        v.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
+        v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, TEXT);
         v.widgets.active.bg_fill = HOVER;
         v.widgets.active.bg_stroke = Stroke::NONE;
-        v.widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
+        v.widgets.active.fg_stroke = Stroke::new(1.0_f32, TEXT);
         s.spacing.item_spacing = Vec2::new(6.0, 3.0);
         s.spacing.button_padding = Vec2::new(8.0, 3.0);
         s.spacing.menu_margin = Margin::same(5);
@@ -109,6 +107,3 @@ pub fn apply(ctx: &egui::Context) {
     });
 }
 
-pub fn mono(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Monospace)
-}

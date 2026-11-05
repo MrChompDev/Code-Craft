@@ -2,7 +2,6 @@
 use eframe::egui;
 use egui::FontFamily;
 use crate::icons;
-use crate::project::Id;
 use crate::theme::*;
 use crate::{BottomTab, LogLevel, TermLine, App};
 use egui::{Align2, Color32, FontId, Pos2, Sense, Vec2};
@@ -14,7 +13,7 @@ pub fn draw(app: &mut App, ui: &mut egui::Ui) {
     p.rect_filled(hrect, 0.0, PANEL_BG);
     p.line_segment(
         [Pos2::new(hrect.left(), hrect.bottom()), Pos2::new(hrect.right(), hrect.bottom())],
-        egui::Stroke::new(1.0, BORDER),
+        egui::Stroke::new(1.0_f32, BORDER),
     );
 
     let names = [
@@ -38,7 +37,7 @@ pub fn draw(app: &mut App, ui: &mut egui::Ui) {
         if active {
             p.line_segment(
                 [Pos2::new(tr.left() + 4.0, tr.bottom()), Pos2::new(tr.right() - 4.0, tr.bottom())],
-                egui::Stroke::new(2.0, ACCENT),
+                egui::Stroke::new(2.0_f32, ACCENT),
             );
         }
         p.text(

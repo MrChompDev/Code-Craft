@@ -33,7 +33,7 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
     p.rect_filled(rect, 0.0, PANEL_BG);
     p.line_segment(
         [Pos2::new(rect.left(), rect.bottom()), Pos2::new(rect.right(), rect.bottom())],
-        egui::Stroke::new(1.0, BORDER),
+        egui::Stroke::new(1.0_f32, BORDER),
     );
 
     let mono = FontId::new(12.0, FontFamily::Proportional);
@@ -54,7 +54,7 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
             p.rect_filled(trect, 0.0, EDITOR_BG);
             p.line_segment(
                 [Pos2::new(trect.left(), trect.bottom()), Pos2::new(trect.right(), trect.bottom())],
-                egui::Stroke::new(2.0, ACCENT),
+                egui::Stroke::new(2.0_f32, ACCENT),
             );
         }
         let hover_resp = ui.interact(trect, egui::Id::new("tab").with(i), Sense::click());
@@ -83,8 +83,8 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
         let xcolor = if xresp.hovered() { TEXT } else { TEXT3 };
         let cx = xr.center();
         let d = 3.2;
-        p.line_segment([Pos2::new(cx.x - d, cx.y - d), Pos2::new(cx.x + d, cx.y + d)], egui::Stroke::new(1.4, xcolor));
-        p.line_segment([Pos2::new(cx.x - d, cx.y + d), Pos2::new(cx.x + d, cx.y - d)], egui::Stroke::new(1.4, xcolor));
+        p.line_segment([Pos2::new(cx.x - d, cx.y - d), Pos2::new(cx.x + d, cx.y + d)], egui::Stroke::new(1.4_f32, xcolor));
+        p.line_segment([Pos2::new(cx.x - d, cx.y + d), Pos2::new(cx.x + d, cx.y - d)], egui::Stroke::new(1.4_f32, xcolor));
         if xresp.clicked() {
             app.close_tab(id);
         } else if hover_resp.clicked() && !xresp.hovered() {
@@ -268,45 +268,8 @@ fn char_width(p: &egui::Painter, font: &FontId) -> f32 {
 
 // ---------------- folding ----------------
 
-fn indent_of(line: &str) -> usize {
-    line.chars().take_while(|&c| c == ' ').count()
-}
 
 /// Indentation-based fold ranges: (open_line, last_hidden_line).
-pub fn fold_ranges(lines: &[String]) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    for i in 0..lines.len() {
-        let base = indent_of(&lines[i]);
-        if lines[i].trim().is_empty() {
-            continue;
-        }
-        if i + 1 >= lines.len() || indent_of(&lines[i + 1]) <= base {
-            continue;
-        }
-        let mut end = i;
-        let mut j = i + 1;
-        while j < lines.len() {
-            let ind = indent_of(&lines[j]);
-            if ind > base {
-                end = j;
-                j += 1;
-            } else {
-                break;
-            }
-        }
-        // include the closing brace/paren line if it follows
-        if end + 1 < lines.len() {
-            let t = lines[end + 1].trim_start();
-            if t.starts_with('}') || t.starts_with(')') || t.starts_with(']') || t.starts_with("</") {
-                end += 1;
-            }
-        }
-        if end > i {
-            out.push((i, end));
-        }
-    }
-    out
-}
 
 // ---------------- syntax highlighting ----------------
 
@@ -576,7 +539,7 @@ fn scan_html(lines: &[String]) -> Vec<Vec<Tok>> {
                 // tokenize the tag: brackets + name orange, attr names purple, strings green
                 let mut k = i;
                 let mut word_start = None;
-                let mut flush = |toks: &mut Vec<Tok>, chars: &[char], a: usize, b: usize| {
+                let flush = |toks: &mut Vec<Tok>, chars: &[char], a: usize, b: usize| {
                     if b > a {
                         let w: String = chars[a..b].iter().collect();
                         let col = if w.starts_with('<') || w.starts_with('/') || w == ">" {

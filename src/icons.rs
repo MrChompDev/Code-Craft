@@ -112,11 +112,6 @@ pub fn bug(p: &Painter, c: Pos2, col: Color32) {
     }
 }
 
-pub fn dots_v(p: &Painter, c: Pos2, col: Color32) {
-    for dy in [-3.6, 0.0, 3.6] {
-        p.circle_filled(c + Vec2::new(0.0, dy), 1.3, col);
-    }
-}
 
 pub fn gear(p: &Painter, c: Pos2, col: Color32) {
     let w = 1.3;
@@ -180,11 +175,6 @@ pub fn folder_plus(p: &Painter, c: Pos2, col: Color32) {
     seg(p, c + Vec2::new(-0.4, -1.7), c + Vec2::new(3.6, -1.7), col, 1.3);
 }
 
-pub fn x_mark(p: &Painter, c: Pos2, s: f32, col: Color32) {
-    let w = 1.3;
-    seg(p, c + Vec2::new(-s, -s), c + Vec2::new(s, s), col, w);
-    seg(p, c + Vec2::new(-s, s), c + Vec2::new(s, -s), col, w);
-}
 
 pub fn terminal_ico(p: &Painter, c: Pos2, col: Color32) {
     let w = 1.4;
@@ -194,7 +184,7 @@ pub fn terminal_ico(p: &Painter, c: Pos2, col: Color32) {
 }
 
 pub fn person(p: &Painter, c: Pos2, col: Color32) {
-    let w = 1.3;
+    let w = 1.3_f32;
     p.circle_stroke(c + Vec2::new(0.0, -2.4), 2.2, Stroke::new(w, col));
     let pts: Vec<Pos2> = (0..=10)
         .map(|i| {

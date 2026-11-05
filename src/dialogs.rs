@@ -2,7 +2,7 @@
 use eframe::egui;
 use crate::icons;
 use crate::theme;
-use crate::{App, OpenDialog};
+use crate::App;
 
 pub fn modals(app: &mut App, ctx: &egui::Context) {
     if app.open_dialog.is_some() {

@@ -6,7 +6,7 @@ use crate::theme::*;
 use crate::{BottomTab, App};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
-fn icon_button(ui: &mut egui::Ui, id: &str, size: Vec2, tooltip: &str, paint: impl FnOnce(&egui::Painter, Pos2)) -> bool {
+fn icon_button(ui: &mut egui::Ui, _id: &str, size: Vec2, tooltip: &str, paint: impl FnOnce(&egui::Painter, Pos2)) -> bool {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let hovered = resp.hovered();
     if hovered {
@@ -41,7 +41,7 @@ pub fn menu_bar(app: &mut App, ui: &mut egui::Ui) {
                     for r in recents {
                         if ui.button(egui::RichText::new(r.clone()).size(12.0)).clicked() {
                             app.open_project_dir(&r);
-                            ui.close_menu();
+                            ui.close();
                         }
                     }
                     if ui.button("Clear List").clicked() {
@@ -49,7 +49,7 @@ pub fn menu_bar(app: &mut App, ui: &mut egui::Ui) {
                         if let Some(dir) = App::settings_dir() {
                             let _ = std::fs::remove_file(dir.join("recents.txt"));
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             }
@@ -314,7 +314,7 @@ pub fn rail(app: &mut App, ui: &mut egui::Ui) {
 
 fn rail_btn(
     ui: &mut egui::Ui,
-    id: &str,
+    _id: &str,
     tooltip: &str,
     active: bool,
     paint: impl FnOnce(&egui::Painter, Pos2),
@@ -324,7 +324,7 @@ fn rail_btn(
         ui.painter().rect_filled(rect, 0.0, SEL_BG);
         ui.painter().line_segment(
             [Pos2::new(rect.left(), rect.top()), Pos2::new(rect.left(), rect.bottom())],
-            Stroke::new(2.0, ACCENT),
+            Stroke::new(2.0_f32, ACCENT),
         );
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, 0.0, HOVER);

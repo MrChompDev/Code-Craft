@@ -569,7 +569,7 @@ impl App {
     pub fn do_run(&mut self) {
         self.bottom_open = true;
         self.bottom_tab = BottomTab::Terminal;
-        let t = now_stamp();
+        let _t = now_stamp();
         if !self.has_cargo_target() {
             self.term.lines.push(TermLine::Err(
                 "No Cargo.toml at project root — use the terminal to run this project.".into(),
@@ -786,7 +786,7 @@ pub fn date_string() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let (y, mo, d, rem) = date_of(secs);
+    let (y, mo, d, _rem) = date_of(secs);
     let dow = ((secs / 86400 + 3) % 7) as usize; // epoch (Thu) → index 3
     let (h, m, s) = clock_of(secs);
     format!(
@@ -1051,7 +1051,7 @@ impl eframe::App for App {
             .frame(
                 egui::Frame::new()
                     .fill(theme::BAR_BG)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ctx, |ui| chrome::toolbar(self, ui));
 
@@ -1077,7 +1077,7 @@ impl eframe::App for App {
                     .resizable(open)
                     .min_height(if open { 90.0 } else { 26.0 })
                     .max_height(if open { 520.0 } else { 26.0 })
-                    .frame(egui::Frame::new().fill(theme::PANEL_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)));
+                    .frame(egui::Frame::new().fill(theme::PANEL_BG).stroke(egui::Stroke::new(1.0_f32, theme::BORDER)));
                 if open {
                     panel = panel.default_height(self.bottom_h);
                 } else {
