@@ -187,9 +187,14 @@ fn terminal_tab(app: &mut App, ui: &mut egui::Ui) {
             // prompt + input
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label(egui::RichText::new("dev@codecraft").font(mono.clone()).color(LOG_OK));
+                let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+                ui.label(egui::RichText::new(user).font(mono.clone()).color(LOG_OK));
                 ui.label(egui::RichText::new(":").font(mono.clone()).color(TEXT2));
-                ui.label(egui::RichText::new("~/demo-project").font(mono.clone()).color(SYN_FN));
+                let short_cwd = app
+                    .cwd
+                    .to_string_lossy()
+                    .replacen(&std::env::var("HOME").unwrap_or_default(), "~", 1);
+                ui.label(egui::RichText::new(short_cwd).font(mono.clone()).color(SYN_FN));
                 ui.label(egui::RichText::new("$ ").font(mono.clone()).color(TEXT2));
                 let out = egui::TextEdit::singleline(&mut app.term.input)
                     .font(egui::TextStyle::Monospace)
@@ -203,7 +208,7 @@ fn terminal_tab(app: &mut App, ui: &mut egui::Ui) {
                 if entered {
                     let cmd = app.term.input.trim().to_string();
                     app.term.input.clear();
-                    exec(app, &cmd);
+                    app.exec_command(&cmd);
                     app.term_focus = true;
                 }
                 // history navigation
@@ -232,126 +237,7 @@ fn terminal_tab(app: &mut App, ui: &mut egui::Ui) {
         });
 }
 
-fn exec(app: &mut App, raw: &str) {
-    let cmd = raw.trim();
-    app.term.lines.push(TermLine::Prompt { cmd: cmd.to_string() });
-    if cmd.is_empty() {
-        return;
-    }
-    app.term.hist.push(cmd.to_string());
-    app.term.hist_idx = None;
-    let mut parts = cmd.split_whitespace();
-    let verb = parts.next().unwrap_or("");
-    let arg = parts.next().unwrap_or("");
-    match verb {
-        "help" => {
-            for l in [
-                "help                 show this list",
-                "ls [dir]             list files",
-                "tree                 show project tree",
-                "cat <file>           print a file",
-                "build                compile the project",
-                "run                  run 'demo-project'",
-                "debug                start a debug session",
-                "echo <text>          print text",
-                "pwd, date, whoami, uname, version, history, clear, exit",
-            ] {
-                app.term.lines.push(TermLine::Out(l.into()));
-            }
-        }
-        "clear" => app.term.lines.clear(),
-        "exit" | "close" => {
-            app.bottom_open = false;
-        }
-        "pwd" => app.term.lines.push(TermLine::Out("/home/dev/demo-project".into())),
-        "whoami" => app.term.lines.push(TermLine::Out("dev".into())),
-        "uname" => app
-            .term
-            .lines
-            .push(TermLine::Out("CodeCraftOS 1.0.0 codecraft x86_64 (rust)".into())),
-        "version" => app.term.lines.push(TermLine::Out("CodeCraft 1.0.0".into())),
-        "date" => app.term.lines.push(TermLine::Out(date_string())),
-        "echo" => {
-            let rest = cmd.split_once(' ').map(|(_, r)| r).unwrap_or("");
-            app.term.lines.push(TermLine::Out(rest.to_string()));
-        }
-        "history" => {
-            for (i, h) in app.term.hist.iter().enumerate() {
-                app.term.lines.push(TermLine::Out(format!("  {:3}  {}", i + 1, h)));
-            }
-        }
-        "ls" => {
-            let dir = resolve_dir(app, arg);
-            match dir {
-                Some(d) => {
-                    let items = app.project.ls(d);
-                    if items.is_empty() {
-                        app.term.lines.push(TermLine::Out("(empty)".into()));
-                    } else {
-                        app.term.lines.push(TermLine::Out(items.join("  ")));
-                    }
-                }
-                None => app.term.lines.push(TermLine::Err(format!("ls: no such directory: {}", arg))),
-            }
-        }
-        "tree" => {
-            let mut out = Vec::new();
-            app.project.tree_lines(app.project.root, "", &mut out);
-            app.term.lines.push(TermLine::Out(app.project.nodes[app.project.root].name.clone()));
-            for (l, is_dir) in out {
-                let _ = is_dir;
-                app.term.lines.push(TermLine::Out(l));
-            }
-        }
-        "cat" => {
-            if arg.is_empty() {
-                app.term.lines.push(TermLine::Err("cat: missing file operand".into()));
-            } else if let Some(id) = app.project.find_by_name(arg) {
-                if let Some(content) = &app.project.nodes[id].content {
-                    for l in content {
-                        app.term.lines.push(TermLine::Out(l.clone()));
-                    }
-                }
-            } else {
-                app.term.lines.push(TermLine::Err(format!("cat: {}: no such file", arg)));
-            }
-        }
-        "build" => {
-            app.do_build();
-            app.term.lines.push(TermLine::Ok("build finished — see Build Output".into()));
-        }
-        "run" => {
-            app.do_run();
-            app.term.lines.push(TermLine::Ok("process exited with code 0".into()));
-        }
-        "debug" => {
-            app.do_debug();
-            app.term.lines.push(TermLine::Info("debugger attached — see Debug Console".into()));
-        }
-        "open" => {
-            if let Some(id) = app.project.find_by_name(arg) {
-                let id: Id = id;
-                app.open_file(id);
-                app.term.lines.push(TermLine::Ok(format!("opened {}", app.project.path_of(id))));
-            } else {
-                app.term.lines.push(TermLine::Err(format!("open: no such file: {}", arg)));
-            }
-        }
-        _ => {
-            app.term
-                .lines
-                .push(TermLine::Err(format!("codecraft: command not found: {} (try 'help')", verb)));
-        }
-    }
-}
 
-fn resolve_dir(app: &App, name: &str) -> Option<Id> {
-    if name.is_empty() || name == "." {
-        return Some(app.project.root);
-    }
-    let clean = name.trim_end_matches('/');
-    app.project.find_child(app.project.root, clean).filter(|&id| app.project.nodes[id].is_dir)
-}
 
 // ---------------- logs ----------------
 

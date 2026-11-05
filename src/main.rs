@@ -432,8 +432,49 @@ impl App {
         self.fold_action = Some(collapse);
     }
 
+    /// Rescan the project from disk, keeping open tabs that still exist.
+    pub fn refresh_tree(&mut self) {
+        let keep: Vec<Id> = self.open_tabs.clone();
+        let mapping = self.project.refresh(&keep);
+        let t = now_stamp();
+        // remap open tabs to their new ids
+        self.open_tabs = self
+            .open_tabs
+            .iter()
+            .filter_map(|&old| mapping.get(&old).copied())
+            .collect();
+        self.active = self
+            .active
+            .and_then(|old| mapping.get(&old).copied())
+            .or(self.open_tabs.first().copied());
+        self.selected = self
+            .selected
+            .and_then(|old| mapping.get(&old).copied())
+            .or(Some(self.project.root));
+        // remap buffers + cursor lines
+        let mut buffers = HashMap::new();
+        for (old, buf) in self.buffers.drain() {
+            if let Some(&new) = mapping.get(&old) {
+                buffers.insert(new, buf);
+            }
+        }
+        self.buffers = buffers;
+        self.cur_line = self
+            .cur_line
+            .iter()
+            .filter_map(|(&old, &l)| mapping.get(&old).map(|&new| (new, l)))
+            .collect();
+        let (files, dirs) = self.project.stats();
+        self.build_log.push(LogLine::new(
+            LogLevel::Info,
+            format!("[{t}] Refreshed: {files} files, {dirs} folders"),
+        ));
+        self.expanded = HashSet::new();
+        self.expanded.insert(self.project.root);
+    }
+
     /// Root-level Cargo.toml means we have a real build target.
-    fn has_cargo_target(&self) -> bool {
+    pub fn has_cargo_target(&self) -> bool {
         self.project
             .root_path
             .as_ref()
@@ -1144,13 +1185,11 @@ fn modals(app: &mut App, ctx: &egui::Context) {
                 ui.set_min_width(420.0);
                 ui.label(egui::RichText::new("Project folder path:").color(theme::TEXT2));
                 let mut open_now = false;
+                let Some(dialog) = app.open_dialog.as_mut() else { return };
                 let field = ui.add_sized(
                     [ui.available_width(), 24.0],
-                    egui::TextEdit::singleline(
-                        &mut app.open_dialog.as_mut().map(|d| d.path).unwrap_or_empty(),
-                    ),
+                    egui::TextEdit::singleline(&mut dialog.path),
                 );
-                let _ = field;
                 ui.horizontal(|ui| {
                     if ui.button("Open").clicked() {
                         open_now = true;
@@ -1158,14 +1197,11 @@ fn modals(app: &mut App, ctx: &egui::Context) {
                     if ui.button("Cancel").clicked() {
                         close = true;
                     }
-                    if ui
-                        .add(egui::Label::new(
-                            egui::RichText::new("~ expands to your home directory").small().color(theme::TEXT3),
-                        ))
-                        .clicked()
-                    {}
+                    ui.weak("~ expands to your home directory");
                 });
-                // recent projects
+                if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    open_now = true;
+                }
                 if !app.recent.is_empty() {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new("Recent").small().color(theme::TEXT3));
@@ -1183,20 +1219,10 @@ fn modals(app: &mut App, ctx: &egui::Context) {
                         }
                     });
                 }
-                if open_now {
-                    if let Some(d) = app.open_dialog.as_ref() {
-                        let p = d.path.trim().to_string();
-                        if !p.is_empty() {
-                            commit = Some(p);
-                        }
-                    }
-                }
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    if let Some(d) = app.open_dialog.as_ref() {
-                        let p = d.path.trim().to_string();
-                        if !p.is_empty() {
-                            commit = Some(p);
-                        }
+                if open_now && commit.is_none() {
+                    let p = dialog.path.trim().to_string();
+                    if !p.is_empty() {
+                        commit = Some(p);
                     }
                 }
             });
@@ -1262,6 +1288,137 @@ fn modals(app: &mut App, ctx: &egui::Context) {
                     app.shortcuts_open = false;
                 }
             });
+    }
+}
+
+/// Quick-open (Ctrl+P) / find-in-files (Ctrl+Shift+F) overlay.
+fn palette_ui(app: &mut App, ctx: &egui::Context) {
+    let mut close = false;
+    let mut activate = false;
+    egui::Window::new(match app.palette.as_ref().map(|p| p.mode) {
+        Some(PaletteMode::Search) => "Find in Project",
+        _ => "Go to File",
+    })
+    .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+    .collapsible(false)
+    .resizable(false)
+    .default_width(560.0)
+    .show(ctx, |ui| {
+        let Some(palette) = app.palette.as_mut() else { return };
+        let field = ui.add_sized(
+            [ui.available_width(), 26.0],
+            egui::TextEdit::singleline(&mut palette.query)
+                .hint_text(match palette.mode {
+                    PaletteMode::Files => "type a file name…",
+                    PaletteMode::Search => "search text across the project…",
+                }),
+        );
+        if !field.has_focus() {
+            field.request_focus();
+        }
+        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            activate = true;
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close = true;
+        }
+
+        match palette.mode {
+            PaletteMode::Files => {
+                // fuzzy subsequence filter over project files
+                let q = palette.query.to_lowercase();
+                let files: Vec<Id> = app.project.walk_files();
+                let mut scored: Vec<(usize, Id)> = files
+                    .into_iter()
+                    .filter_map(|id| {
+                        let name = app.project.nodes[id].name.to_lowercase();
+                        if q.is_empty() {
+                            return Some((0, id));
+                        }
+                        // subsequence match with a small score
+                        let mut qi = q.chars().peekable();
+                        let mut score = 0;
+                        for (i, ch) in name.chars().enumerate() {
+                            if qi.peek() == Some(&ch) {
+                                qi.next();
+                                score += i;
+                                if qi.peek().is_none() {
+                                    break;
+                                }
+                            }
+                        }
+                        (qi.peek().is_none()).then_some((score, id))
+                    })
+                    .collect();
+                scored.sort_by_key(|(s, _)| *s);
+                let list: Vec<Id> = scored.into_iter().map(|(_, id)| id).take(40).collect();
+                palette.files = list.clone();
+                if palette.selected >= list.len() {
+                    palette.selected = list.len().saturating_sub(1);
+                }
+                egui::ScrollArea::vertical().max_height(320.0).auto_shrink(false).show(ui, |ui| {
+                    for (i, &id) in list.iter().enumerate() {
+                        let path = app.project.path_of(id);
+                        let selected = i == palette.selected;
+                        let label = egui::RichText::new(path).size(12.5).color(if selected {
+                            theme::TEXT
+                        } else {
+                            theme::TEXT2
+                        });
+                        if ui.add(egui::Button::new(label).fill(if selected { theme::HOVER } else { egui::Color32::TRANSPARENT })).clicked() {
+                            palette.selected = i;
+                            activate = true;
+                        }
+                    }
+                });
+            }
+            PaletteMode::Search => {
+                let (n, pos, total) = match &palette.scan {
+                    Some(s) => (s.results.len(), s.pos, s.queue.len()),
+                    None => (0, 0, 0),
+                };
+                ui.weak(format!("{n} results — scanning {pos}/{total}"));
+                let results: Vec<(Id, usize, String)> = match &palette.scan {
+                    Some(s) => s.results.clone(),
+                    None => Vec::new(),
+                };
+                egui::ScrollArea::vertical().max_height(320.0).auto_shrink(false).show(ui, |ui| {
+                    for (i, (id, line_no, text)) in results.iter().enumerate() {
+                        let path = format!("{}:{}", app.project.path_of(*id), line_no);
+                        let label = format!("{path}  {text}");
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(label).size(11.5).color(theme::TEXT2)).fill(egui::Color32::TRANSPARENT))
+                            .clicked()
+                        {
+                            palette.selected = i;
+                            activate = true;
+                        }
+                    }
+                });
+            }
+        }
+    });
+    let _ = close;
+    if activate {
+        if let Some(palette) = app.palette.take() {
+            match palette.mode {
+                PaletteMode::Files => {
+                    if let Some(&id) = palette.files.get(palette.selected) {
+                        app.open_file(id);
+                    }
+                }
+                PaletteMode::Search => {
+                    if let Some((id, line_no, _)) = palette.scan.as_ref().and_then(|s| s.results.get(palette.selected)) {
+                        let id = *id;
+                        app.open_file(id);
+                        app.cur_line.insert(id, *line_no);
+                        app.scroll_to_cursor = true;
+                    } else {
+                        app.palette = Some(palette);
+                    }
+                }
+            }
+        }
     }
 }
 

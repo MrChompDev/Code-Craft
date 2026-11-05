@@ -29,7 +29,41 @@ pub fn menu_bar(app: &mut App, ui: &mut egui::Ui) {
                 app.intent_new_folder();
             }
             ui.separator();
-            item_disabled(ui, "Open Recent", "");
+            if item(ui, "Open Folder…", "") {
+                app.open_dialog = Some(crate::OpenDialog {
+                    path: String::new(),
+                    error: None,
+                });
+            }
+            if !app.recent.is_empty() {
+                ui.menu_button("Open Recent", |ui| {
+                    let recents = app.recent.clone();
+                    for r in recents {
+                        if ui.button(egui::RichText::new(r).size(12.0)).clicked() {
+                            app.open_project_dir(&r);
+                            ui.close_menu();
+                        }
+                    }
+                    if ui.button("Clear List").clicked() {
+                        app.recent.clear();
+                        if let Some(dir) = App::settings_dir() {
+                            let _ = std::fs::remove_file(dir.join("recents.txt"));
+                        }
+                        ui.close_menu();
+                    }
+                });
+            }
+            ui.separator();
+            if item(ui, "Save", "Ctrl+S") {
+                app.save_active();
+            }
+            if item(ui, "Save All", "Ctrl+Shift+S") {
+                app.save_all();
+            }
+            if item(ui, "Refresh Project", "") {
+                app.refresh_tree();
+            }
+            ui.separator();
             item_disabled(ui, "Settings…", "");
             ui.separator();
             if item(ui, "Exit", "Alt+F4") {
