@@ -697,7 +697,10 @@ impl Project {
         match self.disk_path(id) {
             Some(p) => {
                 let target = p.with_file_name(new_name);
-                fs::rename(p, target)
+                fs::rename(&p, &target).map_err(|e| {
+                    eprintln!("DBG rename {:?} -> {:?}: {:?}", p, target, e);
+                    e
+                })
             }
             None => Ok(()),
         }
@@ -714,5 +717,129 @@ impl Project {
             }
             None => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// Build a small on-disk fixture:
+    /// root/
+    ///   src/            (main.rs, lib.rs)
+    ///   .git/           (must be skipped)
+    ///   target/         (must be skipped)
+    ///   README.md
+    fn fixture() -> (tempfile::TempDir, Project) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub struct S;\n").unwrap();
+        fs::create_dir_all(dir.path().join(".git/objects")).unwrap();
+        fs::write(dir.path().join(".git/HEAD"), "ref: refs/heads/master\n").unwrap();
+        fs::create_dir_all(dir.path().join("target/debug")).unwrap();
+        fs::write(dir.path().join("target/debug/marker"), "x").unwrap();
+        fs::write(dir.path().join("README.md"), "# fixture\n").unwrap();
+        let project = Project::open_disk(dir.path()).expect("open_disk");
+        (dir, project)
+    }
+
+    fn child<'a>(p: &'a Project, dir: Id, name: &str) -> Id {
+        p.find_child(dir, name).unwrap_or_else(|| panic!("missing child {name}"))
+    }
+
+    #[test]
+    fn open_disk_scans_tree_and_skips_vcs_and_build_dirs() {
+        let (_dir, p) = fixture();
+        let root = p.root;
+        assert_eq!(p.nodes[root].children.len(), 2, "only src/ and README.md visible");
+        assert!(p.find_child(root, ".git").is_none(), ".git must be skipped");
+        assert!(p.find_child(root, "target").is_none(), "target must be skipped");
+        let src = child(&p, root, "src");
+        assert!(p.nodes[src].is_dir);
+        assert_eq!(p.nodes[src].children.len(), 2, "main.rs + lib.rs");
+    }
+
+    #[test]
+    fn open_disk_lists_directories_before_files() {
+        let (_dir, p) = fixture();
+        let kids = &p.nodes[p.root].children;
+        assert!(p.nodes[kids[0]].is_dir, "first entry should be the src/ dir");
+        assert!(!p.nodes[kids[1]].is_dir, "second entry should be README.md");
+    }
+
+    #[test]
+    fn disk_path_maps_nodes_to_absolute_paths() {
+        let (dir, p) = fixture();
+        let readme = child(&p, p.root, "README.md");
+        let expected = dir.path().join("README.md");
+        assert_eq!(p.disk_path(readme).unwrap(), expected);
+        // root itself maps to the project root
+        assert_eq!(p.disk_path(p.root).unwrap(), dir.path());
+    }
+
+    #[test]
+    fn read_and_write_files_roundtrip_through_disk() {
+        let (_dir, mut p) = fixture();
+        let readme = child(&p, p.root, "README.md");
+        assert_eq!(p.read_file(readme).unwrap(), "# fixture\n");
+        p.write_file(readme, "# changed\n").unwrap();
+        assert_eq!(p.read_file(readme).unwrap(), "# changed\n");
+        assert_eq!(fs::read_to_string(_dir.path().join("README.md")).unwrap(), "# changed\n");
+    }
+
+    #[test]
+    fn create_rename_delete_write_through_to_disk() {
+        let (dir, mut p) = fixture();
+        // create
+        p.create_entry(p.root, "notes.txt", false).unwrap();
+        assert!(dir.path().join("notes.txt").is_file());
+        let id = p.add(p.root, "notes.txt", false, None);
+        // rename
+        println!("disk_path(id) = {:?}", p.disk_path(id));
+        println!("exists: {:?}", dir.path().join("notes.txt").exists());
+        println!("root_path: {:?}", p.root_path);
+        println!("path_of(id) = {:?}", p.path_of(id));
+        p.rename_entry(id, "notes.md").unwrap();
+        assert!(!dir.path().join("notes.txt").exists());
+        assert!(dir.path().join("notes.md").is_file());
+        // delete
+        p.delete_entry(id).unwrap();
+        assert!(!dir.path().join("notes.md").exists());
+    }
+
+    #[test]
+    fn refresh_survives_external_changes_and_remaps_tabs() {
+        let (dir, mut p) = fixture();
+        let readme = child(&p, p.root, "README.md");
+        // externally delete src/lib.rs, then refresh with README open
+        fs::remove_file(dir.path().join("src/lib.rs")).unwrap();
+        let mapping = p.refresh(&[readme]);
+        assert!(!mapping.is_empty(), "README.md should survive the refresh");
+        assert!(p.find_child(p.root, "README.md").is_some());
+        let src = child(&p, p.root, "src");
+        assert!(p.find_child(src, "lib.rs").is_none(), "externally deleted file must disappear");
+    }
+
+    #[test]
+    fn demo_project_stays_in_memory_without_root_path() {
+        let mut p = Project::new_demo();
+        assert!(p.root_path.is_none());
+        let main_js = p.find_child(p.find_child(p.root, "src").unwrap(), "main.js").unwrap();
+        // read returns inline content; write updates the in-memory node
+        assert!(p.read_file(main_js).unwrap().contains("CodeCraft"));
+        p.write_file(main_js, "hello\n").unwrap();
+        assert_eq!(p.read_file(main_js).unwrap(), "hello");
+    }
+
+    #[test]
+    fn file_type_detection_covers_common_languages() {
+        assert_eq!(ft_of("main.rs"), Ft::Rs);
+        assert_eq!(ft_of("app.PY"), Ft::Py);
+        assert_eq!(ft_of("script.test.ts"), Ft::Js);
+        assert_eq!(ft_of("data.json"), Ft::Json);
+        assert_eq!(ft_of("notes.md"), Ft::Md);
+        assert_eq!(ft_of("Makefile"), Ft::Other);
     }
 }
