@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Check (zero errors, zero warnings)
+        run: cargo check 2>&1 | tee check.log && ! grep -q "^warning" check.log
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy (ratchet: <= 13 warnings, see CONSTRAINTS.md)
+        run: |
+          cargo clippy 2>&1 | tee clippy.log
+          n=$(grep -cE "^warning: " clippy.log || true)
+          echo "clippy warnings: $n"
+          [ "$n" -le 13 ]
+      - name: Tests
+        run: cargo test
+      - name: Dependency audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
