@@ -1,8 +1,8 @@
 // Quick-open (Ctrl+P) and find-in-project (Ctrl+Shift+F) overlays.
-use eframe::egui;
 use crate::project::Id;
 use crate::theme;
 use crate::App;
+use eframe::egui;
 
 /// Quick-open / find-in-files overlay state.
 pub struct Palette {
@@ -28,8 +28,6 @@ pub struct ScanState {
     pub results: Vec<(Id, usize, String)>,
 }
 
-
-
 /// Quick-open (Ctrl+P) / find-in-files (Ctrl+Shift+F) overlay.
 pub fn palette_ui(app: &mut App, ctx: &egui::Context) {
     let mut close = false;
@@ -43,14 +41,15 @@ pub fn palette_ui(app: &mut App, ctx: &egui::Context) {
     .resizable(false)
     .default_width(560.0)
     .show(ctx, |ui| {
-        let Some(palette) = app.palette.as_mut() else { return };
+        let Some(palette) = app.palette.as_mut() else {
+            return;
+        };
         let field = ui.add_sized(
             [ui.available_width(), 26.0],
-            egui::TextEdit::singleline(&mut palette.query)
-                .hint_text(match palette.mode {
-                    PaletteMode::Files => "type a file name…",
-                    PaletteMode::Search => "search text across the project…",
-                }),
+            egui::TextEdit::singleline(&mut palette.query).hint_text(match palette.mode {
+                PaletteMode::Files => "type a file name…",
+                PaletteMode::Search => "search text across the project…",
+            }),
         );
         if !field.has_focus() {
             field.request_focus();
@@ -95,21 +94,31 @@ pub fn palette_ui(app: &mut App, ctx: &egui::Context) {
                 if palette.selected >= list.len() {
                     palette.selected = list.len().saturating_sub(1);
                 }
-                egui::ScrollArea::vertical().max_height(320.0).auto_shrink(false).show(ui, |ui| {
-                    for (i, &id) in list.iter().enumerate() {
-                        let path = app.project.path_of(id);
-                        let selected = i == palette.selected;
-                        let label = egui::RichText::new(path).size(12.5).color(if selected {
-                            theme::TEXT
-                        } else {
-                            theme::TEXT2
-                        });
-                        if ui.add(egui::Button::new(label).fill(if selected { theme::HOVER } else { egui::Color32::TRANSPARENT })).clicked() {
-                            palette.selected = i;
-                            activate = true;
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        for (i, &id) in list.iter().enumerate() {
+                            let path = app.project.path_of(id);
+                            let selected = i == palette.selected;
+                            let label = egui::RichText::new(path).size(12.5).color(if selected {
+                                theme::TEXT
+                            } else {
+                                theme::TEXT2
+                            });
+                            if ui
+                                .add(egui::Button::new(label).fill(if selected {
+                                    theme::HOVER
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                }))
+                                .clicked()
+                            {
+                                palette.selected = i;
+                                activate = true;
+                            }
                         }
-                    }
-                });
+                    });
             }
             PaletteMode::Search => {
                 let (n, pos, total) = match &palette.scan {
@@ -121,19 +130,27 @@ pub fn palette_ui(app: &mut App, ctx: &egui::Context) {
                     Some(s) => s.results.clone(),
                     None => Vec::new(),
                 };
-                egui::ScrollArea::vertical().max_height(320.0).auto_shrink(false).show(ui, |ui| {
-                    for (i, (id, line_no, text)) in results.iter().enumerate() {
-                        let path = format!("{}:{}", app.project.path_of(*id), line_no);
-                        let label = format!("{path}  {text}");
-                        if ui
-                            .add(egui::Button::new(egui::RichText::new(label).size(11.5).color(theme::TEXT2)).fill(egui::Color32::TRANSPARENT))
-                            .clicked()
-                        {
-                            palette.selected = i;
-                            activate = true;
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        for (i, (id, line_no, text)) in results.iter().enumerate() {
+                            let path = format!("{}:{}", app.project.path_of(*id), line_no);
+                            let label = format!("{path}  {text}");
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(label).size(11.5).color(theme::TEXT2),
+                                    )
+                                    .fill(egui::Color32::TRANSPARENT),
+                                )
+                                .clicked()
+                            {
+                                palette.selected = i;
+                                activate = true;
+                            }
                         }
-                    }
-                });
+                    });
             }
         }
     });
@@ -147,7 +164,11 @@ pub fn palette_ui(app: &mut App, ctx: &egui::Context) {
                     }
                 }
                 PaletteMode::Search => {
-                    if let Some((id, line_no, _)) = palette.scan.as_ref().and_then(|s| s.results.get(palette.selected)) {
+                    if let Some((id, line_no, _)) = palette
+                        .scan
+                        .as_ref()
+                        .and_then(|s| s.results.get(palette.selected))
+                    {
                         let id = *id;
                         app.open_file(id);
                         app.cur_line.insert(id, *line_no);
@@ -167,7 +188,11 @@ impl App {
         let Some(mut scan) = self.palette.as_mut().and_then(|p| p.scan.take()) else {
             return;
         };
-        let query = self.palette.as_ref().map(|p| p.query.clone()).unwrap_or_default();
+        let query = self
+            .palette
+            .as_ref()
+            .map(|p| p.query.clone())
+            .unwrap_or_default();
         if query.len() < 2 {
             // keep the scan slot alive so shortening the query doesn't kill the search
             if let Some(p) = self.palette.as_mut() {
@@ -182,7 +207,9 @@ impl App {
             let id = scan.queue[scan.pos];
             scan.pos += 1;
             done += 1;
-            let Ok(text) = self.project.read_file(id) else { continue };
+            let Ok(text) = self.project.read_file(id) else {
+                continue;
+            };
             if text.len() > 1_000_000 {
                 continue;
             }

@@ -1,8 +1,8 @@
 // Modal dialogs: open-folder, about, keyboard shortcuts.
-use eframe::egui;
 use crate::icons;
 use crate::theme;
 use crate::App;
+use eframe::egui;
 
 pub fn modals(app: &mut App, ctx: &egui::Context) {
     if app.open_dialog.is_some() {
@@ -16,7 +16,9 @@ pub fn modals(app: &mut App, ctx: &egui::Context) {
                 ui.set_min_width(420.0);
                 ui.label(egui::RichText::new("Project folder path:").color(theme::TEXT2));
                 let mut open_now = false;
-                let Some(dialog) = app.open_dialog.as_mut() else { return };
+                let Some(dialog) = app.open_dialog.as_mut() else {
+                    return;
+                };
                 let field = ui.add_sized(
                     [ui.available_width(), 24.0],
                     egui::TextEdit::singleline(&mut dialog.path),
@@ -36,19 +38,23 @@ pub fn modals(app: &mut App, ctx: &egui::Context) {
                 if !app.recent.is_empty() {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new("Recent").small().color(theme::TEXT3));
-                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-                        let recents = app.recent.clone();
-                        for r in recents {
-                            if ui
-                                .add(egui::Button::new(
-                                    egui::RichText::new(r.clone()).size(12.0).color(theme::TEXT2),
-                                ))
-                                .clicked()
-                            {
-                                commit = Some(r);
+                    egui::ScrollArea::vertical()
+                        .max_height(140.0)
+                        .show(ui, |ui| {
+                            let recents = app.recent.clone();
+                            for r in recents {
+                                if ui
+                                    .add(egui::Button::new(
+                                        egui::RichText::new(r.clone())
+                                            .size(12.0)
+                                            .color(theme::TEXT2),
+                                    ))
+                                    .clicked()
+                                {
+                                    commit = Some(r);
+                                }
                             }
-                        }
-                    });
+                        });
                 }
                 if open_now && commit.is_none() {
                     let p = dialog.path.trim().to_string();
@@ -107,13 +113,15 @@ pub fn modals(app: &mut App, ctx: &egui::Context) {
                     ("Shift+F9", "Debug"),
                     ("Esc", "Cancel / close"),
                 ];
-                egui::Grid::new("shortcuts_grid").spacing([16.0, 4.0]).show(ui, |ui| {
-                    for (k, v) in rows {
-                        ui.label(egui::RichText::new(k).monospace().color(theme::SYN_KW));
-                        ui.label(egui::RichText::new(v).color(theme::TEXT2));
-                        ui.end_row();
-                    }
-                });
+                egui::Grid::new("shortcuts_grid")
+                    .spacing([16.0, 4.0])
+                    .show(ui, |ui| {
+                        for (k, v) in rows {
+                            ui.label(egui::RichText::new(k).monospace().color(theme::SYN_KW));
+                            ui.label(egui::RichText::new(v).color(theme::TEXT2));
+                            ui.end_row();
+                        }
+                    });
                 ui.add_space(6.0);
                 if ui.button("Close").clicked() {
                     app.shortcuts_open = false;

@@ -1,11 +1,11 @@
 // Project explorer: tree view with file-type icons and quick actions.
-use eframe::egui;
-use egui::{Color32, FontFamily, Stroke};
 use crate::icons::{self, Chev};
 use crate::project::{ft_of, Id};
 use crate::theme::*;
-use crate::{Pending, App};
+use crate::{App, Pending};
+use eframe::egui;
 use egui::{Align2, FontId, Pos2, Sense, Vec2};
+use egui::{Color32, FontFamily, Stroke};
 
 const ROW_H: f32 = 22.0;
 
@@ -13,13 +13,22 @@ pub fn draw(app: &mut App, ui: &mut egui::Ui) {
     // header (plain horizontal: horizontal_centered would eat the full panel height)
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
-        ui.label(egui::RichText::new("Project").size(12.0).strong().color(TEXT));
+        ui.label(
+            egui::RichText::new("Project")
+                .size(12.0)
+                .strong()
+                .color(TEXT),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if quick_btn(ui, "collapse_all", "Collapse All", |p, c| icons::chevrons_in(p, c, TEXT2)) {
+            if quick_btn(ui, "collapse_all", "Collapse All", |p, c| {
+                icons::chevrons_in(p, c, TEXT2)
+            }) {
                 app.expanded.clear();
                 app.expanded.insert(app.project.root);
             }
-            if quick_btn(ui, "new_folder", "New Folder", |p, c| icons::folder_plus(p, c, TEXT2)) {
+            if quick_btn(ui, "new_folder", "New Folder", |p, c| {
+                icons::folder_plus(p, c, TEXT2)
+            }) {
                 app.intent_new_folder();
             }
             if quick_btn(ui, "new_file", "New File", |p, c| icons::plus(p, c, TEXT2)) {
@@ -93,15 +102,34 @@ fn rec(app: &mut App, ui: &mut egui::Ui, id: Id, depth: usize) {
     let mut chev_hit = None;
     if is_dir {
         let cc = Pos2::new(rect.left() + indent + 4.0, cy);
-        icons::chevron(p, cc, 5.5, if expanded { TEXT } else { TEXT2 }, if expanded { Chev::Down } else { Chev::Right });
+        icons::chevron(
+            p,
+            cc,
+            5.5,
+            if expanded { TEXT } else { TEXT2 },
+            if expanded { Chev::Down } else { Chev::Right },
+        );
         let cr = egui::Rect::from_center_size(cc, Vec2::splat(16.0));
         chev_hit = Some(ui.interact(cr, egui::Id::new("chev").with(id), Sense::click()));
-        icons::folder(p, Pos2::new(rect.left() + indent + 22.0, cy), FOLDER, expanded);
+        icons::folder(
+            p,
+            Pos2::new(rect.left() + indent + 22.0, cy),
+            FOLDER,
+            expanded,
+        );
     } else {
-        icons::badge(p, Pos2::new(rect.left() + indent + 13.0, cy), ft_of(&name), false);
+        icons::badge(
+            p,
+            Pos2::new(rect.left() + indent + 13.0, cy),
+            ft_of(&name),
+            false,
+        );
     }
     p.text(
-        Pos2::new(rect.left() + indent + (if is_dir { 34.0 } else { 22.0 }), cy),
+        Pos2::new(
+            rect.left() + indent + (if is_dir { 34.0 } else { 22.0 }),
+            cy,
+        ),
         Align2::LEFT_CENTER,
         &name,
         FontId::new(12.0, FontFamily::Proportional),
@@ -130,12 +158,20 @@ fn rec(app: &mut App, ui: &mut egui::Ui, id: Id, depth: usize) {
         if is_dir {
             if ui.button("New File…").clicked() {
                 app.expanded.insert(id);
-                app.pending = Some(Pending::New { parent: id, is_dir: false, name: String::new() });
+                app.pending = Some(Pending::New {
+                    parent: id,
+                    is_dir: false,
+                    name: String::new(),
+                });
                 ui.close();
             }
             if ui.button("New Folder…").clicked() {
                 app.expanded.insert(id);
-                app.pending = Some(Pending::New { parent: id, is_dir: true, name: String::new() });
+                app.pending = Some(Pending::New {
+                    parent: id,
+                    is_dir: true,
+                    name: String::new(),
+                });
                 ui.close();
             }
             ui.separator();
@@ -167,7 +203,11 @@ fn rec(app: &mut App, ui: &mut egui::Ui, id: Id, depth: usize) {
             let mut n = name;
             let entered = entry_row(ui, depth + 1, &mut n);
             if entered {
-                app.pending = Some(Pending::New { parent: id, is_dir: pd, name: n });
+                app.pending = Some(Pending::New {
+                    parent: id,
+                    is_dir: pd,
+                    name: n,
+                });
                 app.commit_pending();
             }
         }
@@ -184,7 +224,10 @@ fn toggle(app: &mut App, id: Id) {
 
 fn entry_row(ui: &mut egui::Ui, depth: usize, name: &mut String) -> bool {
     let indent = 6.0 + (depth + 1) as f32 * 14.0 + 4.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width().max(120.0), ROW_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width().max(120.0), ROW_H),
+        Sense::hover(),
+    );
     let p = ui.painter();
     p.rect_filled(rect, 3.0, Color32::from_rgb(0x33, 0x35, 0x39));
 
@@ -202,16 +245,13 @@ fn entry_row(ui: &mut egui::Ui, depth: usize, name: &mut String) -> bool {
     );
 
     let out = ui
-        .scope_builder(
-            egui::UiBuilder::new().max_rect(brect),
-            |ui| {
-                egui::TextEdit::singleline(name)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(box_w - 8.0)
-                    .frame(false)
-                    .show(ui)
-            },
-        )
+        .scope_builder(egui::UiBuilder::new().max_rect(brect), |ui| {
+            egui::TextEdit::singleline(name)
+                .font(egui::TextStyle::Monospace)
+                .desired_width(box_w - 8.0)
+                .frame(false)
+                .show(ui)
+        })
         .inner;
     let resp = out.response;
     let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));

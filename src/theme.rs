@@ -93,10 +93,22 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.icon_width = 14.0;
         s.text_styles = [
             (TextStyle::Body, FontId::new(12.5, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(12.5, FontFamily::Proportional)),
-            (TextStyle::Small, FontId::new(10.5, FontFamily::Proportional)),
-            (TextStyle::Heading, FontId::new(16.0, FontFamily::Proportional)),
-            (TextStyle::Monospace, FontId::new(12.5, FontFamily::Monospace)),
+            (
+                TextStyle::Button,
+                FontId::new(12.5, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Small,
+                FontId::new(10.5, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Heading,
+                FontId::new(16.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Monospace,
+                FontId::new(12.5, FontFamily::Monospace),
+            ),
             // editor code text; the gutter draws with the same metrics
             (
                 TextStyle::Name("editor".into()),
@@ -106,4 +118,3 @@ pub fn apply(ctx: &egui::Context) {
         .into();
     });
 }
-

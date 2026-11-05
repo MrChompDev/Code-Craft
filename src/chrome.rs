@@ -1,12 +1,18 @@
 // Menu bar, main toolbar, left rail, status bar.
-use eframe::egui;
-use egui::FontFamily;
 use crate::icons::{self, Chev};
 use crate::theme::*;
-use crate::{BottomTab, App};
+use crate::{App, BottomTab};
+use eframe::egui;
+use egui::FontFamily;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
-fn icon_button(ui: &mut egui::Ui, _id: &str, size: Vec2, tooltip: &str, paint: impl FnOnce(&egui::Painter, Pos2)) -> bool {
+fn icon_button(
+    ui: &mut egui::Ui,
+    _id: &str,
+    size: Vec2,
+    tooltip: &str,
+    paint: impl FnOnce(&egui::Painter, Pos2),
+) -> bool {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let hovered = resp.hovered();
     if hovered {
@@ -39,7 +45,10 @@ pub fn menu_bar(app: &mut App, ui: &mut egui::Ui) {
                 ui.menu_button("Open Recent", |ui| {
                     let recents = app.recent.clone();
                     for r in recents {
-                        if ui.button(egui::RichText::new(r.clone()).size(12.0)).clicked() {
+                        if ui
+                            .button(egui::RichText::new(r.clone()).size(12.0))
+                            .clicked()
+                        {
                             app.open_project_dir(&r);
                             ui.close();
                         }
@@ -205,7 +214,13 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
             FontId::new(13.5, FontFamily::Proportional),
             TEXT,
         );
-        icons::chevron(p, Pos2::new(brect.right() - 12.0, brect.center().y), 6.0, TEXT2, Chev::Down);
+        icons::chevron(
+            p,
+            Pos2::new(brect.right() - 12.0, brect.center().y),
+            6.0,
+            TEXT2,
+            Chev::Down,
+        );
         bresp.on_hover_text("Project 'demo-project'");
 
         // git branch widget
@@ -254,9 +269,13 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
         rresp.on_hover_text("Run 'demo-project' (Shift+F10)");
 
         // debug button
-        if icon_button(ui, "dbg", Vec2::new(30.0, 26.0), "Debug 'demo-project' (Shift+F9)", |p, c| {
-            icons::bug(p, c, TEXT2)
-        }) {
+        if icon_button(
+            ui,
+            "dbg",
+            Vec2::new(30.0, 26.0),
+            "Debug 'demo-project' (Shift+F9)",
+            |p, c| icons::bug(p, c, TEXT2),
+        ) {
             app.do_debug();
         }
 
@@ -271,7 +290,10 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
                 ui.close();
             }
             if ui.button("Clean Project").clicked() {
-                app.build_log.push(crate::LogLine::new(crate::LogLevel::Info, "[00:00:00] Cleaned build directory"));
+                app.build_log.push(crate::LogLine::new(
+                    crate::LogLevel::Info,
+                    "[00:00:00] Cleaned build directory",
+                ));
                 app.bottom_open = true;
                 app.bottom_tab = BottomTab::Build;
                 ui.close();
@@ -282,15 +304,33 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
 
         // right cluster
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_button(ui, "bell", Vec2::new(28.0, 26.0), "Notifications", |p, c| {
-                icons::bell(p, c, TEXT2);
-                p.circle_filled(c + Vec2::new(3.5, -3.5), 2.0, LOG_ERR);
+            if icon_button(
+                ui,
+                "bell",
+                Vec2::new(28.0, 26.0),
+                "Notifications",
+                |p, c| {
+                    icons::bell(p, c, TEXT2);
+                    p.circle_filled(c + Vec2::new(3.5, -3.5), 2.0, LOG_ERR);
+                },
+            ) {}
+            if icon_button(
+                ui,
+                "person",
+                Vec2::new(28.0, 26.0),
+                "Account: dev",
+                |p, c| icons::person(p, c, TEXT2),
+            ) {}
+            if icon_button(ui, "gear", Vec2::new(28.0, 26.0), "Settings", |p, c| {
+                icons::gear(p, c, TEXT2)
             }) {}
-            if icon_button(ui, "person", Vec2::new(28.0, 26.0), "Account: dev", |p, c| icons::person(p, c, TEXT2)) {}
-            if icon_button(ui, "gear", Vec2::new(28.0, 26.0), "Settings", |p, c| icons::gear(p, c, TEXT2)) {}
-            if icon_button(ui, "search", Vec2::new(28.0, 26.0), "Search Everywhere", |p, c| {
-                icons::magnifier(p, c, TEXT2)
-            }) {}
+            if icon_button(
+                ui,
+                "search",
+                Vec2::new(28.0, 26.0),
+                "Search Everywhere",
+                |p, c| icons::magnifier(p, c, TEXT2),
+            ) {}
         });
     });
 }
@@ -300,15 +340,25 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
 pub fn rail(app: &mut App, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.add_space(6.0);
-        rail_btn(ui, "files", "Project", app.show_tree, |p, c| icons::grid_dots(p, c, TEXT2));
-        rail_btn(ui, "search", "Search Everywhere", false, |p, c| icons::magnifier(p, c, TEXT2));
-        rail_btn(ui, "branch", "Git: main", false, |p, c| icons::branch(p, c, TEXT2));
+        rail_btn(ui, "files", "Project", app.show_tree, |p, c| {
+            icons::grid_dots(p, c, TEXT2)
+        });
+        rail_btn(ui, "search", "Search Everywhere", false, |p, c| {
+            icons::magnifier(p, c, TEXT2)
+        });
+        rail_btn(ui, "branch", "Git: main", false, |p, c| {
+            icons::branch(p, c, TEXT2)
+        });
         rail_btn(ui, "run", "Run 'demo-project'", false, |p, c| {
             icons::play(p, c, 8.0, PLAY_GREEN)
         });
-        rail_btn(ui, "term", "Terminal", app.bottom_open && app.bottom_tab == BottomTab::Terminal, |p, c| {
-            icons::terminal_ico(p, c, TEXT2)
-        });
+        rail_btn(
+            ui,
+            "term",
+            "Terminal",
+            app.bottom_open && app.bottom_tab == BottomTab::Terminal,
+            |p, c| icons::terminal_ico(p, c, TEXT2),
+        );
     });
 }
 
@@ -323,7 +373,10 @@ fn rail_btn(
     if active {
         ui.painter().rect_filled(rect, 0.0, SEL_BG);
         ui.painter().line_segment(
-            [Pos2::new(rect.left(), rect.top()), Pos2::new(rect.left(), rect.bottom())],
+            [
+                Pos2::new(rect.left(), rect.top()),
+                Pos2::new(rect.left(), rect.bottom()),
+            ],
             Stroke::new(2.0_f32, ACCENT),
         );
     } else if resp.hovered() {

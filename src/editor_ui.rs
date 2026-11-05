@@ -1,11 +1,11 @@
 // Multi-tab code editor: line numbers, active line, folding, syntax colors.
 // Since the engine build-out, the code view is a real editable TextEdit with
 // the syntax colorizer applied through a custom layouter.
-use eframe::egui;
 use crate::icons;
 use crate::project::{ft_of, Ft};
 use crate::theme::*;
 use crate::App;
+use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Pos2, Sense, Vec2};
 
 const ROW_H: f32 = 20.0;
@@ -32,7 +32,10 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
     let p = ui.painter();
     p.rect_filled(rect, 0.0, PANEL_BG);
     p.line_segment(
-        [Pos2::new(rect.left(), rect.bottom()), Pos2::new(rect.right(), rect.bottom())],
+        [
+            Pos2::new(rect.left(), rect.bottom()),
+            Pos2::new(rect.right(), rect.bottom()),
+        ],
         egui::Stroke::new(1.0_f32, BORDER),
     );
 
@@ -53,7 +56,10 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
         if active {
             p.rect_filled(trect, 0.0, EDITOR_BG);
             p.line_segment(
-                [Pos2::new(trect.left(), trect.bottom()), Pos2::new(trect.right(), trect.bottom())],
+                [
+                    Pos2::new(trect.left(), trect.bottom()),
+                    Pos2::new(trect.right(), trect.bottom()),
+                ],
                 egui::Stroke::new(2.0_f32, ACCENT),
             );
         }
@@ -62,7 +68,12 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
             p.rect_filled(trect, 0.0, HOVER);
         }
 
-        icons::badge(p, Pos2::new(trect.left() + 15.0, trect.center().y), ft_of(&name), false);
+        icons::badge(
+            p,
+            Pos2::new(trect.left() + 15.0, trect.center().y),
+            ft_of(&name),
+            false,
+        );
         p.text(
             Pos2::new(trect.left() + 26.0, trect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -72,7 +83,11 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
         );
         // modified dot
         if dirty {
-            p.circle_filled(Pos2::new(trect.right() - 24.0, trect.center().y), 2.6, ACCENT);
+            p.circle_filled(
+                Pos2::new(trect.right() - 24.0, trect.center().y),
+                2.6,
+                ACCENT,
+            );
         }
         // close X
         let xr = egui::Rect::from_center_size(
@@ -83,8 +98,14 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
         let xcolor = if xresp.hovered() { TEXT } else { TEXT3 };
         let cx = xr.center();
         let d = 3.2;
-        p.line_segment([Pos2::new(cx.x - d, cx.y - d), Pos2::new(cx.x + d, cx.y + d)], egui::Stroke::new(1.4_f32, xcolor));
-        p.line_segment([Pos2::new(cx.x - d, cx.y + d), Pos2::new(cx.x + d, cx.y - d)], egui::Stroke::new(1.4_f32, xcolor));
+        p.line_segment(
+            [Pos2::new(cx.x - d, cx.y - d), Pos2::new(cx.x + d, cx.y + d)],
+            egui::Stroke::new(1.4_f32, xcolor),
+        );
+        p.line_segment(
+            [Pos2::new(cx.x - d, cx.y + d), Pos2::new(cx.x + d, cx.y - d)],
+            egui::Stroke::new(1.4_f32, xcolor),
+        );
         if xresp.clicked() {
             app.close_tab(id);
         } else if hover_resp.clicked() && !xresp.hovered() {
@@ -99,106 +120,112 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
 // ---------------- code view ----------------
 
 fn code_view(app: &mut App, ui: &mut egui::Ui) {
-    egui::ScrollArea::both()
-        .auto_shrink(false)
-        .show(ui, |ui| {
-            let Some(id) = app.active else {
-                empty_state(ui);
+    egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+        let Some(id) = app.active else {
+            empty_state(ui);
+            return;
+        };
+        // Make sure a buffer exists for the active tab (open_file usually did).
+        if !app.buffers.contains_key(&id) {
+            let text = app.project.read_file(id).unwrap_or_default();
+            app.buffers.insert(id, crate::Buffer { text, dirty: false });
+        }
+        let ft = ft_of(&app.project.nodes[id].name);
+
+        // gutter metrics
+        let probe = ui.painter();
+        let mono = FontId::monospace(FONT_SIZE);
+        let cw = char_width(probe, &mono);
+        let line_count = app.buffer_text(id).lines().count().max(1);
+        let digits = line_count.to_string().len().max(2);
+        let gutter_w = 14.0 + digits as f32 * cw + 14.0;
+
+        // cursor line for gutter highlight
+        let cur_line = app.cur_line.get(&id).copied().unwrap_or(1).min(line_count);
+
+        ui.horizontal(|ui| {
+            // ---- gutter ----
+            let gutter_h = (line_count as f32 * ROW_H + 20.0).max(ui.available_height() - 8.0);
+            let (grect, _) = ui.allocate_exact_size(Vec2::new(gutter_w, gutter_h), Sense::hover());
+            let gp = ui.painter_at(grect);
+            gp.rect_filled(grect, 0.0, EDITOR_BG);
+            let y = grect.top() + 4.0 + (cur_line - 1) as f32 * ROW_H;
+            gp.rect_filled(
+                egui::Rect::from_min_size(
+                    Pos2::new(grect.left(), y),
+                    Vec2::new(grect.width(), ROW_H),
+                ),
+                0.0,
+                ACTIVE_LINE,
+            );
+            for i in 1..=line_count {
+                let cy = grect.top() + 4.0 + (i - 1) as f32 * ROW_H + ROW_H / 2.0;
+                gp.text(
+                    Pos2::new(grect.right() - 8.0, cy),
+                    egui::Align2::RIGHT_CENTER,
+                    i.to_string(),
+                    mono.clone(),
+                    if i == cur_line {
+                        GUTTER_NUM_CUR
+                    } else {
+                        GUTTER_NUM
+                    },
+                );
+            }
+
+            // ---- editable text ----
+            let Some(buf) = app.buffers.get_mut(&id) else {
                 return;
             };
-            // Make sure a buffer exists for the active tab (open_file usually did).
-            if !app.buffers.contains_key(&id) {
-                let text = app.project.read_file(id).unwrap_or_default();
-                app.buffers.insert(id, crate::Buffer { text, dirty: false });
-            }
-            let ft = ft_of(&app.project.nodes[id].name);
-
-            // gutter metrics
-            let probe = ui.painter();
-            let mono = FontId::monospace(FONT_SIZE);
-            let cw = char_width(probe, &mono);
-            let line_count = app.buffer_text(id).lines().count().max(1);
-            let digits = line_count.to_string().len().max(2);
-            let gutter_w = 14.0 + digits as f32 * cw + 14.0;
-
-            // cursor line for gutter highlight
-            let cur_line = app.cur_line.get(&id).copied().unwrap_or(1).min(line_count);
-
-            ui.horizontal(|ui| {
-                // ---- gutter ----
-                let gutter_h = (line_count as f32 * ROW_H + 20.0).max(ui.available_height() - 8.0);
-                let (grect, _) = ui.allocate_exact_size(Vec2::new(gutter_w, gutter_h), Sense::hover());
-                let gp = ui.painter_at(grect);
-                gp.rect_filled(grect, 0.0, EDITOR_BG);
-                let y = grect.top() + 4.0 + (cur_line - 1) as f32 * ROW_H;
-                gp.rect_filled(
-                    egui::Rect::from_min_size(Pos2::new(grect.left(), y), Vec2::new(grect.width(), ROW_H)),
-                    0.0,
-                    ACTIVE_LINE,
-                );
-                for i in 1..=line_count {
-                    let cy = grect.top() + 4.0 + (i - 1) as f32 * ROW_H + ROW_H / 2.0;
-                    gp.text(
-                        Pos2::new(grect.right() - 8.0, cy),
-                        egui::Align2::RIGHT_CENTER,
-                        i.to_string(),
-                        mono.clone(),
-                        if i == cur_line { GUTTER_NUM_CUR } else { GUTTER_NUM },
-                    );
+            let text = buf.text.clone();
+            // Tokenize once per text revision; the layouter reuses the
+            // cached tokens whenever the buffer text is unchanged.
+            let text_hash = hash_str(&text);
+            let cached_toks = match app.token_cache.get(&id) {
+                Some((h, toks)) if *h == text_hash => Some(toks.clone()),
+                _ => {
+                    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+                    let toks = tokens_for(ft, &lines);
+                    app.token_cache.insert(id, (text_hash, toks.clone()));
+                    Some(toks)
                 }
-
-                // ---- editable text ----
-                let Some(buf) = app.buffers.get_mut(&id) else { return };
-                let text = buf.text.clone();
-                // Tokenize once per text revision; the layouter reuses the
-                // cached tokens whenever the buffer text is unchanged.
-                let text_hash = hash_str(&text);
-                let cached_toks = match app.token_cache.get(&id) {
-                    Some((h, toks)) if *h == text_hash => Some(toks.clone()),
-                    _ => {
-                        let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
-                        let toks = tokens_for(ft, &lines);
-                        app.token_cache.insert(id, (text_hash, toks.clone()));
-                        Some(toks)
-                    }
+            };
+            let mut layouter = |ui: &egui::Ui, src: &dyn egui::TextBuffer, _wrap: f32| {
+                let s = src.as_str();
+                // If the user typed this very frame, colorize fresh
+                // against the live text (cache catches up next frame).
+                let toks = if s == text.as_str() {
+                    cached_toks.clone().unwrap_or_default()
+                } else {
+                    let lines: Vec<String> = s.lines().map(|l| l.to_string()).collect();
+                    tokens_for(ft, &lines)
                 };
-                let mut layouter =
-                    |ui: &egui::Ui, src: &dyn egui::TextBuffer, _wrap: f32| {
-                        let s = src.as_str();
-                        // If the user typed this very frame, colorize fresh
-                        // against the live text (cache catches up next frame).
-                        let toks = if s == text.as_str() {
-                            cached_toks.clone().unwrap_or_default()
-                        } else {
-                            let lines: Vec<String> = s.lines().map(|l| l.to_string()).collect();
-                            tokens_for(ft, &lines)
-                        };
-                        let job = build_job(s, &toks);
-                        ui.fonts(|f| f.layout_job(job))
-                    };
-                let out = egui::TextEdit::multiline(&mut buf.text)
-                    .id(egui::Id::new("editor").with(id))
-                    .font(egui::TextStyle::Name("editor".into()))
-                    .desired_width(ui.available_width())
-                    .frame(false)
-                    .layouter(&mut layouter)
-                    .show(ui);
+                let job = build_job(s, &toks);
+                ui.fonts(|f| f.layout_job(job))
+            };
+            let out = egui::TextEdit::multiline(&mut buf.text)
+                .id(egui::Id::new("editor").with(id))
+                .font(egui::TextStyle::Name("editor".into()))
+                .desired_width(ui.available_width())
+                .frame(false)
+                .layouter(&mut layouter)
+                .show(ui);
 
-                // track cursor line
-                if let Some(cursor) = out.cursor_range {
-                    let idx = cursor.primary.index;
-                    let line = text[..idx.min(text.len())].matches('\n').count() + 1;
-                    app.cur_line.insert(id, line);
-                }
-                if out.response.changed() {
-                    app.mark_dirty(id, true);
-                }
-                if app.scroll_to_cursor {
-                    app.scroll_to_cursor = false;
-                    out.response.scroll_to_me(Some(egui::Align::Center));
-                }
-            });
+            // track cursor line
+            if let Some(cursor) = out.cursor_range {
+                let idx = cursor.primary.index;
+                let line = text[..idx.min(text.len())].matches('\n').count() + 1;
+                app.cur_line.insert(id, line);
+            }
+            if out.response.changed() {
+                app.mark_dirty(id, true);
+            }
+            if app.scroll_to_cursor {
+                app.scroll_to_cursor = false;
+                out.response.scroll_to_me(Some(egui::Align::Center));
+            }
         });
+    });
 }
 
 /// Assemble the syntax-colored LayoutJob from precomputed line tokens.
@@ -220,17 +247,29 @@ fn build_job(text: &str, toks: &[Vec<Tok>]) -> egui::text::LayoutJob {
             for t in &line_toks {
                 if t.s > pos {
                     let seg: String = line.chars().skip(pos).take(t.s - pos).collect();
-                    job.append(seg.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+                    job.append(
+                        seg.as_str(),
+                        0.0,
+                        egui::TextFormat::simple(mono.clone(), SYN_PLAIN),
+                    );
                 }
                 if t.e > t.s {
                     let seg: String = line.chars().skip(t.s).take(t.e - t.s).collect();
-                    job.append(seg.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), t.c));
+                    job.append(
+                        seg.as_str(),
+                        0.0,
+                        egui::TextFormat::simple(mono.clone(), t.c),
+                    );
                 }
                 pos = pos.max(t.e);
             }
             if pos < line.chars().count() {
                 let seg: String = line.chars().skip(pos).collect();
-                job.append(seg.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+                job.append(
+                    seg.as_str(),
+                    0.0,
+                    egui::TextFormat::simple(mono.clone(), SYN_PLAIN),
+                );
             }
         }
         // newline keeps the job text identical to the buffer text
@@ -255,19 +294,34 @@ fn empty_state(ui: &mut egui::Ui) {
                 .size(13.0)
                 .color(TEXT3),
         );
-        ui.label(egui::RichText::new("Go to File: Ctrl+N").size(13.0).color(TEXT3));
-        ui.label(egui::RichText::new("Recent Files: Ctrl+E").size(13.0).color(TEXT3));
+        ui.label(
+            egui::RichText::new("Go to File: Ctrl+N")
+                .size(13.0)
+                .color(TEXT3),
+        );
+        ui.label(
+            egui::RichText::new("Recent Files: Ctrl+E")
+                .size(13.0)
+                .color(TEXT3),
+        );
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("Drop files here to open them").size(13.0).color(TEXT3));
+        ui.label(
+            egui::RichText::new("Drop files here to open them")
+                .size(13.0)
+                .color(TEXT3),
+        );
     });
 }
 
 fn char_width(p: &egui::Painter, font: &FontId) -> f32 {
-    (p.layout_no_wrap("0".repeat(32), font.clone(), TEXT).rect.width() / 32.0).max(6.0)
+    (p.layout_no_wrap("0".repeat(32), font.clone(), TEXT)
+        .rect
+        .width()
+        / 32.0)
+        .max(6.0)
 }
 
 // ---------------- folding ----------------
-
 
 /// Indentation-based fold ranges: (open_line, last_hidden_line).
 
@@ -284,11 +338,45 @@ fn cfg_for(ft: Ft) -> Option<LangCfg> {
     match ft {
         Ft::Js => Some(LangCfg {
             kw: &[
-                "const", "let", "var", "function", "class", "extends", "constructor", "this",
-                "return", "if", "else", "for", "of", "in", "while", "await", "async", "throw",
-                "new", "typeof", "import", "export", "from", "default", "try", "catch", "true",
-                "false", "null", "undefined", "break", "continue", "instanceof", "delete", "void",
-                "yield", "static", "get", "set",
+                "const",
+                "let",
+                "var",
+                "function",
+                "class",
+                "extends",
+                "constructor",
+                "this",
+                "return",
+                "if",
+                "else",
+                "for",
+                "of",
+                "in",
+                "while",
+                "await",
+                "async",
+                "throw",
+                "new",
+                "typeof",
+                "import",
+                "export",
+                "from",
+                "default",
+                "try",
+                "catch",
+                "true",
+                "false",
+                "null",
+                "undefined",
+                "break",
+                "continue",
+                "instanceof",
+                "delete",
+                "void",
+                "yield",
+                "static",
+                "get",
+                "set",
             ],
             line_comment: Some("//"),
             block_comment: Some(("/*", "*/")),
@@ -351,11 +439,19 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
             if in_block {
                 let rest: String = chars[i..].iter().collect();
                 if let Some(pos) = rest.find(be) {
-                    toks.push(Tok { s: i, e: i + pos + be.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: i + pos + be.len(),
+                        c: SYN_COM,
+                    });
                     i += pos + be.len();
                     in_block = false;
                 } else {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                 }
                 continue;
@@ -364,10 +460,18 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
             if !bs.is_empty() && rest.starts_with(bs) {
                 let rest2 = &rest[bs.len()..];
                 if let Some(pos) = rest2.find(be) {
-                    toks.push(Tok { s: i, e: i + bs.len() + pos + be.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: i + bs.len() + pos + be.len(),
+                        c: SYN_COM,
+                    });
                     i += bs.len() + pos + be.len();
                 } else {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                     in_block = true;
                 }
@@ -375,7 +479,11 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
             }
             if let Some(lc) = cfg.line_comment {
                 if rest.starts_with(lc) {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                     continue;
                 }
@@ -401,12 +509,18 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
                 } else {
                     SYN_STR
                 };
-                toks.push(Tok { s: i, e: end, c: color });
+                toks.push(Tok {
+                    s: i,
+                    e: end,
+                    c: color,
+                });
                 i = end;
                 prev_word.clear();
                 continue;
             }
-            if c.is_ascii_digit() || (c == '.' && chars.get(i + 1).map_or(false, |d| d.is_ascii_digit())) {
+            if c.is_ascii_digit()
+                || (c == '.' && chars.get(i + 1).map_or(false, |d| d.is_ascii_digit()))
+            {
                 let mut j = i;
                 while j < chars.len()
                     && (chars[j].is_ascii_alphanumeric()
@@ -416,7 +530,11 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
                 {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: j, c: SYN_NUM });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_NUM,
+                });
                 i = j;
                 prev_word.clear();
                 continue;
@@ -427,7 +545,11 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
                 while j < chars.len() && chars[j].is_ascii_alphanumeric() {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: j, c: SYN_NUM });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_NUM,
+                });
                 i = j;
                 continue;
             }
@@ -436,46 +558,76 @@ fn scan_generic(cfg: LangCfg, ft: Ft, lines: &[String]) -> Vec<Vec<Tok>> {
                 while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: j, c: SYN_TYPE });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_TYPE,
+                });
                 i = j;
                 continue;
             }
             if c == '@' && ft == Ft::Css {
                 let mut j = i;
-                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '-' || chars[j] == '@') {
+                while j < chars.len()
+                    && (chars[j].is_alphanumeric() || chars[j] == '-' || chars[j] == '@')
+                {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: j, c: SYN_KW });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_KW,
+                });
                 i = j;
                 continue;
             }
             if c.is_alphabetic() || c == '_' {
                 let mut j = i;
-                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_' || chars[j] == '-') {
+                while j < chars.len()
+                    && (chars[j].is_alphanumeric() || chars[j] == '_' || chars[j] == '-')
+                {
                     j += 1;
                 }
                 let word: String = chars[i..j].iter().collect();
                 let after: String = chars[j..].iter().collect();
                 let color = if cfg.kw.contains(&word.as_str()) {
                     SYN_KW
-                } else if prev_word == "def" || prev_word == "function" || after.trim_start().starts_with('(') {
+                } else if prev_word == "def"
+                    || prev_word == "function"
+                    || after.trim_start().starts_with('(')
+                {
                     SYN_FN
-                } else if prev_word == "class" || word.chars().next().map_or(false, |ch| ch.is_uppercase()) {
+                } else if prev_word == "class"
+                    || word.chars().next().map_or(false, |ch| ch.is_uppercase())
+                {
                     SYN_TYPE
                 } else {
                     SYN_PLAIN
                 };
-                toks.push(Tok { s: i, e: j, c: color });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: color,
+                });
                 prev_word = word;
                 i = j;
                 continue;
             }
             // punctuation / whitespace
             let mut j = i + 1;
-            while j < chars.len() && !(chars[j].is_alphanumeric() || chars[j] == '_' || chars[j] == '"' || chars[j] == '\'') {
+            while j < chars.len()
+                && !(chars[j].is_alphanumeric()
+                    || chars[j] == '_'
+                    || chars[j] == '"'
+                    || chars[j] == '\'')
+            {
                 j += 1;
             }
-            toks.push(Tok { s: i, e: j, c: SYN_PLAIN });
+            toks.push(Tok {
+                s: i,
+                e: j,
+                c: SYN_PLAIN,
+            });
             if chars[i] == ':' || chars[i] == '=' || chars[i] == '(' || chars[i] == '.' {
                 prev_word.clear();
             }
@@ -498,21 +650,37 @@ fn scan_html(lines: &[String]) -> Vec<Vec<Tok>> {
             let rest: String = chars[i..].iter().collect();
             if in_comment {
                 if let Some(pos) = rest.find("-->") {
-                    toks.push(Tok { s: i, e: i + pos + 3, c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: i + pos + 3,
+                        c: SYN_COM,
+                    });
                     i += pos + 3;
                     in_comment = false;
                 } else {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                 }
                 continue;
             }
             if rest.starts_with("<!--") {
                 if let Some(pos) = rest[4..].find("-->") {
-                    toks.push(Tok { s: i, e: i + 4 + pos + 3, c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: i + 4 + pos + 3,
+                        c: SYN_COM,
+                    });
                     i += 4 + pos + 3;
                 } else {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                     in_comment = true;
                 }
@@ -560,7 +728,11 @@ fn scan_html(lines: &[String]) -> Vec<Vec<Tok>> {
                             while m < j && chars[m] != q {
                                 m += 1;
                             }
-                            toks.push(Tok { s: k, e: (m + 1).min(j), c: SYN_STR });
+                            toks.push(Tok {
+                                s: k,
+                                e: (m + 1).min(j),
+                                c: SYN_STR,
+                            });
                             k = m + 1;
                             continue;
                         }
@@ -578,7 +750,11 @@ fn scan_html(lines: &[String]) -> Vec<Vec<Tok>> {
                         }
                     } else if c == '=' {
                         flush(&mut toks, &chars, word_start.take().unwrap_or(k), k);
-                        toks.push(Tok { s: k, e: k + 1, c: SYN_PLAIN });
+                        toks.push(Tok {
+                            s: k,
+                            e: k + 1,
+                            c: SYN_PLAIN,
+                        });
                     }
                     k += 1;
                 }
@@ -595,7 +771,11 @@ fn scan_html(lines: &[String]) -> Vec<Vec<Tok>> {
                 j += 1;
             }
             if j > i {
-                toks.push(Tok { s: i, e: j, c: SYN_PLAIN });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_PLAIN,
+                });
             }
             i = j;
         }
@@ -619,21 +799,37 @@ fn scan_css(lines: &[String]) -> Vec<Vec<Tok>> {
             let rest: String = chars[i..].iter().collect();
             if in_comment {
                 if let Some(pos) = rest.find("*/") {
-                    toks.push(Tok { s: i, e: i + pos + 2, c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: i + pos + 2,
+                        c: SYN_COM,
+                    });
                     i += pos + 2;
                     in_comment = false;
                 } else {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                 }
                 continue;
             }
             if rest.starts_with("/*") {
                 if let Some(pos) = rest[2..].find("*/") {
-                    toks.push(Tok { s: i, e: i + 2 + pos + 2, c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: i + 2 + pos + 2,
+                        c: SYN_COM,
+                    });
                     i += 2 + pos + 2;
                 } else {
-                    toks.push(Tok { s: i, e: chars.len(), c: SYN_COM });
+                    toks.push(Tok {
+                        s: i,
+                        e: chars.len(),
+                        c: SYN_COM,
+                    });
                     i = chars.len();
                     in_comment = true;
                 }
@@ -645,7 +841,11 @@ fn scan_css(lines: &[String]) -> Vec<Vec<Tok>> {
                 while j < chars.len() && chars[j] != c {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: (j + 1).min(chars.len()), c: SYN_STR });
+                toks.push(Tok {
+                    s: i,
+                    e: (j + 1).min(chars.len()),
+                    c: SYN_STR,
+                });
                 i = j + 1;
                 continue;
             }
@@ -656,10 +856,18 @@ fn scan_css(lines: &[String]) -> Vec<Vec<Tok>> {
                     j += 1;
                 }
                 if j > i {
-                    toks.push(Tok { s: i, e: j, c: SYN_SEL });
+                    toks.push(Tok {
+                        s: i,
+                        e: j,
+                        c: SYN_SEL,
+                    });
                 }
                 if j < chars.len() {
-                    toks.push(Tok { s: j, e: j + 1, c: SYN_PLAIN });
+                    toks.push(Tok {
+                        s: j,
+                        e: j + 1,
+                        c: SYN_PLAIN,
+                    });
                 }
                 i = j + 1;
                 continue;
@@ -669,7 +877,11 @@ fn scan_css(lines: &[String]) -> Vec<Vec<Tok>> {
                 while j < chars.len() && chars[j].is_ascii_alphanumeric() {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: j, c: SYN_NUM });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_NUM,
+                });
                 i = j;
                 continue;
             }
@@ -677,16 +889,24 @@ fn scan_css(lines: &[String]) -> Vec<Vec<Tok>> {
                 || (c == '.' && chars.get(i + 1).map_or(false, |d| d.is_ascii_digit()))
             {
                 let mut j = i;
-                while j < chars.len() && (chars[j].is_ascii_alphanumeric() || chars[j] == '.' || chars[j] == '%') {
+                while j < chars.len()
+                    && (chars[j].is_ascii_alphanumeric() || chars[j] == '.' || chars[j] == '%')
+                {
                     j += 1;
                 }
-                toks.push(Tok { s: i, e: j, c: SYN_NUM });
+                toks.push(Tok {
+                    s: i,
+                    e: j,
+                    c: SYN_NUM,
+                });
                 i = j;
                 continue;
             }
             if c.is_alphabetic() || c == '-' || c == '@' {
                 let mut j = i;
-                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '-' || chars[j] == '@') {
+                while j < chars.len()
+                    && (chars[j].is_alphanumeric() || chars[j] == '-' || chars[j] == '@')
+                {
                     j += 1;
                 }
                 let word: String = chars[i..j].iter().collect();
@@ -702,7 +922,11 @@ fn scan_css(lines: &[String]) -> Vec<Vec<Tok>> {
                 i = j;
                 continue;
             }
-            toks.push(Tok { s: i, e: i + 1, c: SYN_PLAIN });
+            toks.push(Tok {
+                s: i,
+                e: i + 1,
+                c: SYN_PLAIN,
+            });
             i += 1;
         }
         out.push(toks);
@@ -722,14 +946,34 @@ fn scan_md(lines: &[String]) -> Vec<Vec<Tok>> {
         }
         let t = line.trim_start();
         if t.starts_with('#') {
-            toks.push(Tok { s: 0, e: n, c: SYN_HEAD });
+            toks.push(Tok {
+                s: 0,
+                e: n,
+                c: SYN_HEAD,
+            });
         } else if t.starts_with("```") {
-            toks.push(Tok { s: 0, e: n, c: SYN_COM });
+            toks.push(Tok {
+                s: 0,
+                e: n,
+                c: SYN_COM,
+            });
         } else if t.starts_with('>') {
-            toks.push(Tok { s: 0, e: n, c: SYN_COM });
+            toks.push(Tok {
+                s: 0,
+                e: n,
+                c: SYN_COM,
+            });
         } else if t.starts_with('-') || t.starts_with('*') {
-            toks.push(Tok { s: 0, e: 1 + (line.len() - t.len()), c: SYN_KW });
-            toks.push(Tok { s: 1 + (line.len() - t.len()), e: n, c: SYN_PLAIN });
+            toks.push(Tok {
+                s: 0,
+                e: 1 + (line.len() - t.len()),
+                c: SYN_KW,
+            });
+            toks.push(Tok {
+                s: 1 + (line.len() - t.len()),
+                e: n,
+                c: SYN_PLAIN,
+            });
         } else {
             // inline `code` and **bold**
             let mut i = 0;
@@ -739,7 +983,11 @@ fn scan_md(lines: &[String]) -> Vec<Vec<Tok>> {
                     while j < n && chars[j] != '`' {
                         j += 1;
                     }
-                    toks.push(Tok { s: i, e: (j + 1).min(n), c: SYN_STR });
+                    toks.push(Tok {
+                        s: i,
+                        e: (j + 1).min(n),
+                        c: SYN_STR,
+                    });
                     i = j + 1;
                 } else if chars[i] == '*' && chars.get(i + 1) == Some(&'*') {
                     let mut j = i + 2;
@@ -747,7 +995,11 @@ fn scan_md(lines: &[String]) -> Vec<Vec<Tok>> {
                         j += 1;
                     }
                     let end = (j + 2).min(n);
-                    toks.push(Tok { s: i, e: end, c: SYN_KW });
+                    toks.push(Tok {
+                        s: i,
+                        e: end,
+                        c: SYN_KW,
+                    });
                     i = end;
                 } else if chars[i] == '[' {
                     let mut j = i + 1;
@@ -755,15 +1007,27 @@ fn scan_md(lines: &[String]) -> Vec<Vec<Tok>> {
                         j += 1;
                     }
                     let end = (j + 1).min(n);
-                    toks.push(Tok { s: i, e: end, c: SYN_FN });
+                    toks.push(Tok {
+                        s: i,
+                        e: end,
+                        c: SYN_FN,
+                    });
                     i = end;
                 } else {
                     let mut j = i;
-                    while j < n && chars[j] != '`' && !(chars[j] == '*' && chars.get(j + 1) == Some(&'*')) && chars[j] != '[' {
+                    while j < n
+                        && chars[j] != '`'
+                        && !(chars[j] == '*' && chars.get(j + 1) == Some(&'*'))
+                        && chars[j] != '['
+                    {
                         j += 1;
                     }
                     if j > i {
-                        toks.push(Tok { s: i, e: j, c: SYN_PLAIN });
+                        toks.push(Tok {
+                            s: i,
+                            e: j,
+                            c: SYN_PLAIN,
+                        });
                     }
                     i = j.max(i + 1);
                 }

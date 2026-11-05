@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
-use std::thread;
 use std::sync::mpsc::Receiver;
+use std::thread;
 
 /// An open document: text loaded from disk plus dirty tracking.
 pub struct Buffer {
@@ -58,7 +58,10 @@ pub struct LogLine {
 
 impl LogLine {
     fn new(level: LogLevel, text: impl Into<String>) -> Self {
-        Self { level, text: text.into() }
+        Self {
+            level,
+            text: text.into(),
+        }
     }
 }
 
@@ -78,8 +81,15 @@ pub struct Terminal {
 }
 
 pub enum Pending {
-    New { parent: Id, is_dir: bool, name: String },
-    Rename { node: Id, name: String },
+    New {
+        parent: Id,
+        is_dir: bool,
+        name: String,
+    },
+    Rename {
+        node: Id,
+        name: String,
+    },
 }
 
 pub struct App {
@@ -192,7 +202,9 @@ impl App {
     /// Write the active buffer to disk. Returns true on success.
     pub fn save_active(&mut self) -> bool {
         let Some(id) = self.active else { return false };
-        let Some(buf) = self.buffers.get(&id) else { return false };
+        let Some(buf) = self.buffers.get(&id) else {
+            return false;
+        };
         let text = buf.text.clone();
         let t = now_stamp();
         match self.project.write_file(id, &text) {
@@ -254,9 +266,14 @@ impl App {
                 self.expanded = HashSet::new();
                 self.expanded.insert(self.project.root);
                 let t = now_stamp();
-                self.build_log.push(LogLine::new(LogLevel::Info, format!("[{t}] Opened project '{name}'")));
-                self.build_log
-                    .push(LogLine::new(LogLevel::Info, format!("[{t}] {files} files, {dirs} folders")));
+                self.build_log.push(LogLine::new(
+                    LogLevel::Info,
+                    format!("[{t}] Opened project '{name}'"),
+                ));
+                self.build_log.push(LogLine::new(
+                    LogLevel::Info,
+                    format!("[{t}] {files} files, {dirs} folders"),
+                ));
                 self.build_log.push(LogLine::new(
                     LogLevel::Info,
                     format!("[{t}] Root: {}", root.display()),
@@ -282,14 +299,25 @@ impl App {
             .ok()
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
-            .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))?;
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| PathBuf::from(h).join(".config"))
+            })?;
         Some(base.join("codecraft"))
     }
 
     fn load_recents() -> Vec<String> {
-        let Some(dir) = Self::settings_dir() else { return Vec::new() };
-        let Ok(body) = std::fs::read_to_string(dir.join("recents.txt")) else { return Vec::new() };
-        body.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
+        let Some(dir) = Self::settings_dir() else {
+            return Vec::new();
+        };
+        let Ok(body) = std::fs::read_to_string(dir.join("recents.txt")) else {
+            return Vec::new();
+        };
+        body.lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
     }
 
     fn remember_recent(&mut self, path: &str) {
@@ -317,7 +345,9 @@ impl App {
     }
 
     pub fn active_line(&self) -> usize {
-        self.active.and_then(|a| self.cur_line.get(&a).copied()).unwrap_or(1)
+        self.active
+            .and_then(|a| self.cur_line.get(&a).copied())
+            .unwrap_or(1)
     }
 
     pub fn intent_new_file(&mut self) {
@@ -327,7 +357,11 @@ impl App {
             None => self.project.root,
         };
         self.expanded.insert(parent);
-        self.pending = Some(Pending::New { parent, is_dir: false, name: String::new() });
+        self.pending = Some(Pending::New {
+            parent,
+            is_dir: false,
+            name: String::new(),
+        });
     }
 
     pub fn intent_new_folder(&mut self) {
@@ -337,12 +371,20 @@ impl App {
             None => self.project.root,
         };
         self.expanded.insert(parent);
-        self.pending = Some(Pending::New { parent, is_dir: true, name: String::new() });
+        self.pending = Some(Pending::New {
+            parent,
+            is_dir: true,
+            name: String::new(),
+        });
     }
 
     pub fn commit_pending(&mut self) {
         match self.pending.take() {
-            Some(Pending::New { parent, is_dir, name }) => {
+            Some(Pending::New {
+                parent,
+                is_dir,
+                name,
+            }) => {
                 let name = name.trim().to_string();
                 if name.is_empty() {
                     return;
@@ -405,8 +447,10 @@ impl App {
         }
         let t = now_stamp();
         if let Err(e) = self.project.delete_entry(id) {
-            self.build_log
-                .push(LogLine::new(LogLevel::Err, format!("[{t}] Delete failed: {e}")));
+            self.build_log.push(LogLine::new(
+                LogLevel::Err,
+                format!("[{t}] Delete failed: {e}"),
+            ));
             self.bottom_open = true;
             self.bottom_tab = BottomTab::Build;
             return;
@@ -477,7 +521,13 @@ impl App {
 
     /// Spawn a child process, stream its stdout/stderr into the terminal or
     /// build log, and report its exit status. Returns true when running.
-    fn spawn_pipeline(&mut self, program: &str, args: &[String], dir: &Path, to_build: bool) -> bool {
+    fn spawn_pipeline(
+        &mut self,
+        program: &str,
+        args: &[String],
+        dir: &Path,
+        to_build: bool,
+    ) -> bool {
         let spawned = Command::new(program)
             .args(args)
             .current_dir(dir)
@@ -528,7 +578,9 @@ impl App {
                 if to_build {
                     self.build_log.push(LogLine::new(LogLevel::Err, msg));
                 } else {
-                    self.term.lines.push(TermLine::Err(format!("spawn failed: {e}")));
+                    self.term
+                        .lines
+                        .push(TermLine::Err(format!("spawn failed: {e}")));
                 }
                 self.running = false;
                 false
@@ -562,7 +614,11 @@ impl App {
             ));
             return;
         }
-        let dir = self.project.root_path.clone().unwrap_or_else(|| self.cwd.clone());
+        let dir = self
+            .project
+            .root_path
+            .clone()
+            .unwrap_or_else(|| self.cwd.clone());
         self.spawn_job(&["cargo", "build"], &dir, true);
     }
 
@@ -576,7 +632,11 @@ impl App {
             ));
             return;
         }
-        let dir = self.project.root_path.clone().unwrap_or_else(|| self.cwd.clone());
+        let dir = self
+            .project
+            .root_path
+            .clone()
+            .unwrap_or_else(|| self.cwd.clone());
         self.spawn_job(&["cargo", "run"], &dir, false);
     }
 
@@ -586,7 +646,10 @@ impl App {
         let env = self.env.clone();
         let t = now_stamp();
         let log = &mut self.dbg_log;
-        log.push(LogLine::new(LogLevel::Debug, format!("[{t}] Debugger attach requested (target: {env})")));
+        log.push(LogLine::new(
+            LogLevel::Debug,
+            format!("[{t}] Debugger attach requested (target: {env})"),
+        ));
         log.push(LogLine::new(
             LogLevel::Debug,
             format!("[{t}] Debug adapter not wired yet — build with 'cargo build' and run from the terminal."),
@@ -604,7 +667,9 @@ impl App {
     /// spawns through `sh -c` with output streamed to the terminal.
     pub fn exec_command(&mut self, raw: &str) {
         let cmd = raw.trim();
-        self.term.lines.push(TermLine::Prompt { cmd: cmd.to_string() });
+        self.term.lines.push(TermLine::Prompt {
+            cmd: cmd.to_string(),
+        });
         if cmd.is_empty() {
             return;
         }
@@ -628,19 +693,27 @@ impl App {
             }
             "clear" => self.term.lines.clear(),
             "exit" | "close" => self.bottom_open = false,
-            "pwd" => self.term.lines.push(TermLine::Out(self.cwd.display().to_string())),
-            "date" => self.term.lines.push(TermLine::Out(date_string())),
-            "version" => self.term.lines.push(TermLine::Out("CodeCraft 1.1.0".into())),
-            "whoami" => self
+            "pwd" => self
                 .term
                 .lines
-                .push(TermLine::Out(std::env::var("USER").unwrap_or_else(|_| "user".into()))),
+                .push(TermLine::Out(self.cwd.display().to_string())),
+            "date" => self.term.lines.push(TermLine::Out(date_string())),
+            "version" => self
+                .term
+                .lines
+                .push(TermLine::Out("CodeCraft 1.1.0".into())),
+            "whoami" => self.term.lines.push(TermLine::Out(
+                std::env::var("USER").unwrap_or_else(|_| "user".into()),
+            )),
             "cd" => {
                 let arg = parts.next().unwrap_or("~");
                 let target = if arg == "~" {
                     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/".into()))
                 } else if arg == ".." {
-                    self.cwd.parent().map(|p| p.to_path_buf()).unwrap_or(self.cwd.clone())
+                    self.cwd
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or(self.cwd.clone())
                 } else {
                     let p = PathBuf::from(arg);
                     if p.is_absolute() {
@@ -660,7 +733,9 @@ impl App {
             "open" => {
                 let arg = parts.next().unwrap_or("");
                 if arg.is_empty() {
-                    self.term.lines.push(TermLine::Err("usage: open <path>".into()));
+                    self.term
+                        .lines
+                        .push(TermLine::Err("usage: open <path>".into()));
                 } else {
                     self.open_project_dir(arg);
                     self.term
@@ -674,7 +749,9 @@ impl App {
             }
             "history" => {
                 for (i, h) in self.term.hist.iter().enumerate() {
-                    self.term.lines.push(TermLine::Out(format!("  {:3}  {}", i + 1, h)));
+                    self.term
+                        .lines
+                        .push(TermLine::Out(format!("  {:3}  {}", i + 1, h)));
                 }
             }
             _ => {
@@ -697,7 +774,9 @@ impl App {
                         0 => self.term.lines.push(TermLine::Out(line)),
                         1 => self.term.lines.push(TermLine::Err(line)),
                         2 => {
-                            self.term.lines.push(TermLine::Ok(format!("process exited with code {line}")));
+                            self.term
+                                .lines
+                                .push(TermLine::Ok(format!("process exited with code {line}")));
                             self.running = false;
                             self.child_pid = None;
                         }
@@ -733,8 +812,10 @@ impl App {
                         self.running = false;
                         self.child_pid = None;
                         let t = now_stamp();
-                        self.build_log
-                            .push(LogLine::new(LogLevel::Ok, format!("[{t}] Build process finished")));
+                        self.build_log.push(LogLine::new(
+                            LogLevel::Ok,
+                            format!("[{t}] Build process finished"),
+                        ));
                         break;
                     }
                 }
@@ -744,7 +825,6 @@ impl App {
             ctx.request_repaint();
         }
     }
-
 }
 
 fn now_stamp() -> String {
@@ -758,7 +838,11 @@ fn now_stamp() -> String {
 
 pub fn clock_of(secs: u64) -> (u32, u32, u32) {
     let rem = secs % 86400;
-    ((rem / 3600) as u32, ((rem % 3600) / 60) as u32, (rem % 60) as u32)
+    (
+        (rem / 3600) as u32,
+        ((rem % 3600) / 60) as u32,
+        (rem % 60) as u32,
+    )
 }
 
 /// Civil date from days since epoch (Howard Hinnant's algorithm).
@@ -791,7 +875,13 @@ pub fn date_string() -> String {
     let (h, m, s) = clock_of(secs);
     format!(
         "{} {} {} {:04} {:02}:{:02}:{:02} UTC",
-        DAYS[dow], MONTHS[(mo - 1) as usize], d, y, h, m, s
+        DAYS[dow],
+        MONTHS[(mo - 1) as usize],
+        d,
+        y,
+        h,
+        m,
+        s
     )
 }
 
@@ -879,17 +969,27 @@ impl App {
             hist: Vec::new(),
             hist_idx: None,
         };
-        term.lines.push(TermLine::Info("CodeCraft Terminal — type 'help' for commands.".into()));
+        term.lines.push(TermLine::Info(
+            "CodeCraft Terminal — type 'help' for commands.".into(),
+        ));
 
         let mut build_log = Vec::new();
         {
             let (files, dirs) = project.stats();
             let t = now_stamp();
-            build_log.push(LogLine::new(LogLevel::Info, format!("[{t}] Project '{project_name}' ready")));
-            build_log
-                .push(LogLine::new(LogLevel::Info, format!("[{t}] {files} files, {dirs} folders")));
+            build_log.push(LogLine::new(
+                LogLevel::Info,
+                format!("[{t}] Project '{project_name}' ready"),
+            ));
+            build_log.push(LogLine::new(
+                LogLevel::Info,
+                format!("[{t}] {files} files, {dirs} folders"),
+            ));
             match &root_path {
-                Some(p) => build_log.push(LogLine::new(LogLevel::Info, format!("[{t}] Root: {}", p.display()))),
+                Some(p) => build_log.push(LogLine::new(
+                    LogLevel::Info,
+                    format!("[{t}] Root: {}", p.display()),
+                )),
                 None => build_log.push(LogLine::new(
                     LogLevel::Warn,
                     format!("[{t}] In-memory demo project — open a folder to work on real files"),
@@ -905,7 +1005,11 @@ impl App {
             frames: 0,
             shot_sent: false,
             screenshot_path,
-            open_tabs: if initial_tab != root { vec![initial_tab] } else { vec![] },
+            open_tabs: if initial_tab != root {
+                vec![initial_tab]
+            } else {
+                vec![]
+            },
             active: (initial_tab != root).then_some(initial_tab),
             selected: Some(initial_tab),
             cur_line: HashMap::new(),
@@ -1077,7 +1181,11 @@ impl eframe::App for App {
                     .resizable(open)
                     .min_height(if open { 90.0 } else { 26.0 })
                     .max_height(if open { 520.0 } else { 26.0 })
-                    .frame(egui::Frame::new().fill(theme::PANEL_BG).stroke(egui::Stroke::new(1.0_f32, theme::BORDER)));
+                    .frame(
+                        egui::Frame::new()
+                            .fill(theme::PANEL_BG)
+                            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
+                    );
                 if open {
                     panel = panel.default_height(self.bottom_h);
                 } else {
@@ -1104,5 +1212,9 @@ impl eframe::App for App {
 
 fn load_icon(bytes: &[u8]) -> egui::IconData {
     let img = image::load_from_memory(bytes).expect("icon").to_rgba8();
-    egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }
+    egui::IconData {
+        width: img.width(),
+        height: img.height(),
+        rgba: img.into_raw(),
+    }
 }

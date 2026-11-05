@@ -84,9 +84,7 @@ impl Project {
     }
 
     pub fn find_by_name(&self, name: &str) -> Option<Id> {
-        self.nodes
-            .iter()
-            .position(|n| !n.is_dir && n.name == name)
+        self.nodes.iter().position(|n| !n.is_dir && n.name == name)
     }
 
     pub fn unique_name(&self, dir: Id, base: &str, is_dir: bool) -> String {
@@ -127,7 +125,8 @@ impl Project {
         let mut kids: Vec<Id> = self.nodes[dir].children.clone();
         kids.sort_by(|&a, &b| {
             let (da, db) = (self.nodes[a].is_dir, self.nodes[b].is_dir);
-            db.cmp(&da).then_with(|| self.nodes[a].name.cmp(&self.nodes[b].name))
+            db.cmp(&da)
+                .then_with(|| self.nodes[a].name.cmp(&self.nodes[b].name))
         });
         let last = kids.len();
         for (i, &k) in kids.iter().enumerate() {
@@ -561,8 +560,17 @@ impl Project {
 impl Project {
     /// Directories never scanned into the tree.
     fn skip_dir(name: &str) -> bool {
-        matches!(name, ".git" | "target" | "node_modules" | "__pycache__" | ".idea" | ".vscode" | "dist" | "build")
-            || (name.starts_with('.') && name != ".github")
+        matches!(
+            name,
+            ".git"
+                | "target"
+                | "node_modules"
+                | "__pycache__"
+                | ".idea"
+                | ".vscode"
+                | "dist"
+                | "build"
+        ) || (name.starts_with('.') && name != ".github")
     }
 
     /// Open a real directory: scan it into the tree. Content is loaded lazily
@@ -638,7 +646,10 @@ impl Project {
         };
         let keep_paths: Vec<(Id, String)> = keep
             .iter()
-            .filter_map(|&id| self.disk_path(id).map(|p| (id, p.to_string_lossy().to_string())))
+            .filter_map(|&id| {
+                self.disk_path(id)
+                    .map(|p| (id, p.to_string_lossy().to_string()))
+            })
             .collect();
         if let Ok(fresh) = Self::open_disk(&root) {
             for (old, path) in keep_paths {
@@ -663,10 +674,41 @@ impl Project {
         let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
         matches!(
             ext.as_str(),
-            "png" | "jpg" | "jpeg" | "gif" | "ico" | "webp" | "bmp" | "exe" | "dll" | "so"
-                | "dylib" | "zip" | "tar" | "gz" | "xz" | "7z" | "rar" | "pdf" | "bin" | "o"
-                | "a" | "rlib" | "woff" | "woff2" | "ttf" | "otf" | "pak" | "mp3" | "mp4"
-                | "wav" | "ogg" | "class" | "jar" | "pyc" | "wasm"
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "ico"
+                | "webp"
+                | "bmp"
+                | "exe"
+                | "dll"
+                | "so"
+                | "dylib"
+                | "zip"
+                | "tar"
+                | "gz"
+                | "xz"
+                | "7z"
+                | "rar"
+                | "pdf"
+                | "bin"
+                | "o"
+                | "a"
+                | "rlib"
+                | "woff"
+                | "woff2"
+                | "ttf"
+                | "otf"
+                | "pak"
+                | "mp3"
+                | "mp4"
+                | "wav"
+                | "ogg"
+                | "class"
+                | "jar"
+                | "pyc"
+                | "wasm"
         )
     }
 
@@ -775,16 +817,24 @@ mod tests {
     }
 
     fn child<'a>(p: &'a Project, dir: Id, name: &str) -> Id {
-        p.find_child(dir, name).unwrap_or_else(|| panic!("missing child {name}"))
+        p.find_child(dir, name)
+            .unwrap_or_else(|| panic!("missing child {name}"))
     }
 
     #[test]
     fn open_disk_scans_tree_and_skips_vcs_and_build_dirs() {
         let (_dir, p) = fixture();
         let root = p.root;
-        assert_eq!(p.nodes[root].children.len(), 2, "only src/ and README.md visible");
+        assert_eq!(
+            p.nodes[root].children.len(),
+            2,
+            "only src/ and README.md visible"
+        );
         assert!(p.find_child(root, ".git").is_none(), ".git must be skipped");
-        assert!(p.find_child(root, "target").is_none(), "target must be skipped");
+        assert!(
+            p.find_child(root, "target").is_none(),
+            "target must be skipped"
+        );
         let src = child(&p, root, "src");
         assert!(p.nodes[src].is_dir);
         assert_eq!(p.nodes[src].children.len(), 2, "main.rs + lib.rs");
@@ -794,7 +844,10 @@ mod tests {
     fn open_disk_lists_directories_before_files() {
         let (_dir, p) = fixture();
         let kids = &p.nodes[p.root].children;
-        assert!(p.nodes[kids[0]].is_dir, "first entry should be the src/ dir");
+        assert!(
+            p.nodes[kids[0]].is_dir,
+            "first entry should be the src/ dir"
+        );
         assert!(!p.nodes[kids[1]].is_dir, "second entry should be README.md");
     }
 
@@ -815,7 +868,10 @@ mod tests {
         assert_eq!(p.read_file(readme).unwrap(), "# fixture\n");
         p.write_file(readme, "# changed\n").unwrap();
         assert_eq!(p.read_file(readme).unwrap(), "# changed\n");
-        assert_eq!(fs::read_to_string(_dir.path().join("README.md")).unwrap(), "# changed\n");
+        assert_eq!(
+            fs::read_to_string(_dir.path().join("README.md")).unwrap(),
+            "# changed\n"
+        );
     }
 
     #[test]
@@ -845,14 +901,19 @@ mod tests {
         assert!(!mapping.is_empty(), "README.md should survive the refresh");
         assert!(p.find_child(p.root, "README.md").is_some());
         let src = child(&p, p.root, "src");
-        assert!(p.find_child(src, "lib.rs").is_none(), "externally deleted file must disappear");
+        assert!(
+            p.find_child(src, "lib.rs").is_none(),
+            "externally deleted file must disappear"
+        );
     }
 
     #[test]
     fn demo_project_stays_in_memory_without_root_path() {
         let mut p = Project::new_demo();
         assert!(p.root_path.is_none());
-        let main_js = p.find_child(p.find_child(p.root, "src").unwrap(), "main.js").unwrap();
+        let main_js = p
+            .find_child(p.find_child(p.root, "src").unwrap(), "main.js")
+            .unwrap();
         // read returns inline content; write updates the in-memory node
         assert!(p.read_file(main_js).unwrap().contains("CodeCraft"));
         p.write_file(main_js, "hello\n").unwrap();
