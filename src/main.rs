@@ -152,6 +152,9 @@ pub struct App {
     pub title_dirty: bool,
     /// Active editor should scroll its cursor into view this frame.
     pub scroll_to_cursor: bool,
+    /// Memoized syntax tokens for the active editor: id -> (text hash, tokens).
+    /// Avoids re-tokenizing the whole file on every layout pass.
+    pub token_cache: HashMap<Id, (u64, Vec<Vec<crate::editor_ui::Tok>>)>,
 }
 
 impl App {
@@ -1009,6 +1012,7 @@ impl App {
             recent: recents,
             title_dirty: true,
             scroll_to_cursor: false,
+            token_cache: HashMap::new(),
         }
     }
 }

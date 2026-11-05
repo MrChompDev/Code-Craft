@@ -150,9 +150,30 @@ fn code_view(app: &mut App, ui: &mut egui::Ui) {
                 // ---- editable text ----
                 let Some(buf) = app.buffers.get_mut(&id) else { return };
                 let text = buf.text.clone();
+                // Tokenize once per text revision; the layouter reuses the
+                // cached tokens whenever the buffer text is unchanged.
+                let text_hash = hash_str(&text);
+                let cached_toks = match app.token_cache.get(&id) {
+                    Some((h, toks)) if *h == text_hash => Some(toks.clone()),
+                    _ => {
+                        let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+                        let toks = tokens_for(ft, &lines);
+                        app.token_cache.insert(id, (text_hash, toks.clone()));
+                        Some(toks)
+                    }
+                };
                 let mut layouter =
                     |ui: &egui::Ui, src: &dyn egui::TextBuffer, _wrap: f32| {
-                        let job = highlight_job(ui, src.as_str(), ft);
+                        let s = src.as_str();
+                        // If the user typed this very frame, colorize fresh
+                        // against the live text (cache catches up next frame).
+                        let toks = if s == text.as_str() {
+                            cached_toks.clone().unwrap_or_default()
+                        } else {
+                            let lines: Vec<String> = s.lines().map(|l| l.to_string()).collect();
+                            tokens_for(ft, &lines)
+                        };
+                        let job = build_job(s, &toks);
                         ui.fonts(|f| f.layout_job(job))
                     };
                 let out = egui::TextEdit::multiline(&mut buf.text)
@@ -180,24 +201,20 @@ fn code_view(app: &mut App, ui: &mut egui::Ui) {
         });
 }
 
-/// Syntax-colored LayoutJob for the editor text; falls back to plain text for
-/// very large files.
-fn highlight_job(ui: &egui::Ui, text: &str, ft: Ft) -> egui::text::LayoutJob {
-    let _ = ui;
+/// Assemble the syntax-colored LayoutJob from precomputed line tokens.
+/// Falls back to plain text for very large files.
+fn build_job(text: &str, toks: &[Vec<Tok>]) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     let mono = FontId::monospace(FONT_SIZE);
     if text.len() > HIGHLIGHT_CAP {
         job.append(text, 0.0, egui::TextFormat::simple(mono, SYN_PLAIN));
         return job;
     }
-    // Tokenize the visible file. tokens_for works per line and tracks
-    // block-comment state across lines, so feed the whole text at once.
-    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
-    let toks = tokens_for(ft, &lines);
+    let lines: Vec<&str> = text.lines().collect();
     for (i, line) in lines.iter().enumerate() {
         let line_toks = toks.get(i).cloned().unwrap_or_default();
         if line_toks.is_empty() {
-            job.append(line.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+            job.append(line, 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
         } else {
             let mut pos = 0usize;
             for t in &line_toks {
@@ -221,6 +238,15 @@ fn highlight_job(ui: &egui::Ui, text: &str, ft: Ft) -> egui::text::LayoutJob {
     }
     job
 }
+
+/// Small stable hash for the token memo (not cryptographic).
+pub fn hash_str(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
 fn empty_state(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() * 0.35);

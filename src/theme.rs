@@ -99,6 +99,11 @@ pub fn apply(ctx: &egui::Context) {
             (TextStyle::Small, FontId::new(10.5, FontFamily::Proportional)),
             (TextStyle::Heading, FontId::new(16.0, FontFamily::Proportional)),
             (TextStyle::Monospace, FontId::new(12.5, FontFamily::Monospace)),
+            // editor code text; the gutter draws with the same metrics
+            (
+                TextStyle::Name("editor".into()),
+                FontId::new(13.2, FontFamily::Monospace),
+            ),
         ]
         .into();
     });
