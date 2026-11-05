@@ -165,6 +165,17 @@ impl App {
         }
         self.selected = Some(id);
         if !self.buffers.contains_key(&id) {
+            if self.project.looks_binary(id) {
+                let t = now_stamp();
+                self.build_log.push(LogLine::new(
+                    LogLevel::Info,
+                    format!(
+                        "[{t}] {} looks binary — not opened as text",
+                        self.project.path_of(id)
+                    ),
+                ));
+                return;
+            }
             match self.project.read_file(id) {
                 Ok(text) => {
                     self.buffers.insert(id, Buffer { text, dirty: false });
@@ -913,6 +924,18 @@ fn main() -> eframe::Result {
     )
 }
 
+/// Choose the file to open on startup: README first, then the first
+/// text-looking source file, else nothing.
+fn pick_initial_tab(project: &Project) -> Option<Id> {
+    if let Some(readme) = project.find_by_name("README.md") {
+        return Some(readme);
+    }
+    project
+        .walk_files()
+        .into_iter()
+        .find(|&id| !project.looks_binary(id))
+}
+
 impl App {
     fn new(screenshot_path: Option<String>, open_path: Option<String>) -> Self {
         // Either the user-provided path or the most recent project.
@@ -937,9 +960,6 @@ impl App {
         let root = project.root;
         let project_name = project.nodes[root].name.clone();
         let cwd = root_path.clone().unwrap_or_else(|| PathBuf::from("."));
-        let main_js = project
-            .find_child(project.find_child(root, "src").unwrap_or(root), "main.js")
-            .unwrap_or(project.walk_files().first().copied().unwrap_or(root));
         let mut expanded = HashSet::new();
         expanded.insert(root);
         for d in ["src", "web", "data", "tests"] {
@@ -973,8 +993,7 @@ impl App {
 
         let envs = vec!["Current File", "Debug Build", "Release Build"];
 
-        // initial tab opens the first real file we can find
-        let initial_tab = if main_js != root { main_js } else { root };
+        let initial_tab = pick_initial_tab(&project).unwrap_or(root);
 
         Self {
             frames: 0,

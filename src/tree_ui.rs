@@ -10,8 +10,8 @@ use egui::{Align2, FontId, Pos2, Sense, Vec2};
 const ROW_H: f32 = 22.0;
 
 pub fn draw(app: &mut App, ui: &mut egui::Ui) {
-    // header
-    ui.horizontal_centered(|ui| {
+    // header (plain horizontal: horizontal_centered would eat the full panel height)
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
         ui.label(egui::RichText::new("Project").size(12.0).strong().color(TEXT));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

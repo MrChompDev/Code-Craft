@@ -568,10 +568,12 @@ impl Project {
     /// Open a real directory: scan it into the tree. Content is loaded lazily
     /// per file by the editor, so large projects cost nothing up front.
     pub fn open_disk(root: &Path) -> std::io::Result<Self> {
-        let name = root
+        // canonicalize so "." / "~" / trailing dots resolve to a real name
+        let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let name = canonical
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| root.to_string_lossy().to_string());
+            .unwrap_or_else(|| canonical.to_string_lossy().to_string());
         let mut p = Project {
             nodes: vec![Node {
                 name,
@@ -581,9 +583,9 @@ impl Project {
                 content: None,
             }],
             root: 0,
-            root_path: Some(root.to_path_buf()),
+            root_path: Some(canonical),
         };
-        p.scan_dir(0, root)?;
+        p.scan_dir(0, &root)?;
         Ok(p)
     }
 
@@ -654,6 +656,36 @@ impl Project {
             *self = fresh;
         }
         mapping
+    }
+
+    /// Extensions we never try to render as text.
+    fn binary_ext(name: &str) -> bool {
+        let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "ico" | "webp" | "bmp" | "exe" | "dll" | "so"
+                | "dylib" | "zip" | "tar" | "gz" | "xz" | "7z" | "rar" | "pdf" | "bin" | "o"
+                | "a" | "rlib" | "woff" | "woff2" | "ttf" | "otf" | "pak" | "mp3" | "mp4"
+                | "wav" | "ogg" | "class" | "jar" | "pyc" | "wasm"
+        )
+    }
+
+    /// Heuristic: extension blocklist plus a NUL-byte sniff of the head.
+    pub fn looks_binary(&self, id: Id) -> bool {
+        if Self::binary_ext(&self.nodes[id].name) {
+            return true;
+        }
+        match self.disk_path(id) {
+            Some(p) => {
+                use std::io::Read;
+                let mut head = [0u8; 8192];
+                match std::fs::File::open(p).and_then(|mut f| f.read(&mut head)) {
+                    Ok(n) => head[..n].contains(&0),
+                    Err(_) => false,
+                }
+            }
+            None => false,
+        }
     }
 
     pub fn read_file(&self, id: Id) -> std::io::Result<String> {
