@@ -1,16 +1,19 @@
 // CodeCraft — a personal IntelliJ-inspired IDE (Rust + eframe/egui).
 mod bottom_ui;
 mod chrome;
+mod dialogs;
 mod editor_ui;
 mod icons;
+mod palette;
 mod project;
 mod theme;
 mod tree_ui;
 
 use eframe::egui;
+use palette::{Palette, PaletteMode, ScanState};
 use project::{Id, Project};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
@@ -29,30 +32,6 @@ pub type TermMsg = (u8, String);
 pub struct OpenDialog {
     pub path: String,
     pub error: Option<String>,
-}
-
-/// Quick-open / find-in-files overlay state.
-pub struct Palette {
-    pub mode: PaletteMode,
-    pub query: String,
-    /// matched file ids for Files mode
-    pub files: Vec<Id>,
-    pub selected: usize,
-    /// incremental text-search state for Search mode
-    pub scan: Option<ScanState>,
-}
-
-#[derive(PartialEq, Clone, Copy)]
-pub enum PaletteMode {
-    Files,
-    Search,
-}
-
-/// Incremental "find in project" scan: advances a few files per frame.
-pub struct ScanState {
-    pub queue: Vec<Id>,
-    pub pos: usize,
-    pub results: Vec<(Id, usize, String)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -496,29 +475,20 @@ impl App {
             .unwrap_or(false)
     }
 
-    fn spawn_job(&mut self, argv: &[&str], dir: &PathBuf, to_build: bool) {
-        let t = now_stamp();
-        let shown = argv.join(" ");
-        if to_build {
-            self.build_log
-                .push(LogLine::new(LogLevel::Info, format!("[{t}] $ {shown}")));
-            self.bottom_open = true;
-            self.bottom_tab = BottomTab::Build;
-        } else {
-            self.term.lines.push(TermLine::Info(format!("$ {shown}")));
-        }
-        let cmd = Command::new(argv[0])
-            .args(&argv[1..])
+    /// Spawn a child process, stream its stdout/stderr into the terminal or
+    /// build log, and report its exit status. Returns true when running.
+    fn spawn_pipeline(&mut self, program: &str, args: &[String], dir: &Path, to_build: bool) -> bool {
+        let spawned = Command::new(program)
+            .args(args)
             .current_dir(dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn();
-        match cmd {
+        match spawned {
             Ok(mut child) => {
                 self.child_pid = Some(child.id());
                 self.running = true;
                 let (tx, rx) = mpsc::channel::<TermMsg>();
-                // stdout + stderr readers + an exit waiter
                 let mut out = child.stdout.take().expect("stdout");
                 let mut err = child.stderr.take().expect("stderr");
                 let tx_out = tx.clone();
@@ -541,7 +511,6 @@ impl App {
                         }
                     }
                 });
-                let mut child = child;
                 thread::spawn(move || {
                     let code = child.wait().ok().and_then(|s| s.code());
                     let _ = tx.send((2u8, format!("{:?}", code)));
@@ -551,17 +520,35 @@ impl App {
                 } else {
                     self.term_rx = Some(rx);
                 }
+                true
             }
             Err(e) => {
+                let t = now_stamp();
                 let msg = format!("[{t}] spawn failed: {e}");
                 if to_build {
                     self.build_log.push(LogLine::new(LogLevel::Err, msg));
                 } else {
-                    self.term.lines.push(TermLine::Err(msg));
+                    self.term.lines.push(TermLine::Err(format!("spawn failed: {e}")));
                 }
                 self.running = false;
+                false
             }
         }
+    }
+
+    fn spawn_job(&mut self, argv: &[&str], dir: &Path, to_build: bool) {
+        let t = now_stamp();
+        let shown = argv.join(" ");
+        if to_build {
+            self.build_log
+                .push(LogLine::new(LogLevel::Info, format!("[{t}] $ {shown}")));
+            self.bottom_open = true;
+            self.bottom_tab = BottomTab::Build;
+        } else {
+            self.term.lines.push(TermLine::Info(format!("$ {shown}")));
+        }
+        let args: Vec<String> = argv[1..].iter().map(|s| s.to_string()).collect();
+        self.spawn_pipeline(argv[0], &args, dir, to_build);
     }
 
     pub fn do_build(&mut self) {
@@ -575,7 +562,7 @@ impl App {
             ));
             return;
         }
-        let dir = self.project.root_path.clone().unwrap_or_default();
+        let dir = self.project.root_path.clone().unwrap_or_else(|| self.cwd.clone());
         self.spawn_job(&["cargo", "build"], &dir, true);
     }
 
@@ -589,7 +576,7 @@ impl App {
             ));
             return;
         }
-        let dir = self.project.root_path.clone().unwrap_or_default();
+        let dir = self.project.root_path.clone().unwrap_or_else(|| self.cwd.clone());
         self.spawn_job(&["cargo", "run"], &dir, false);
     }
 
@@ -691,54 +678,11 @@ impl App {
                 }
             }
             _ => {
-                // real execution through sh
+                // real execution through sh, streamed into the terminal
                 let shell_cmd = format!("exec {}", cmd);
-                let cmd = Command::new("sh")
-                    .arg("-c")
-                    .arg(&shell_cmd)
-                    .current_dir(&self.cwd)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn();
-                match cmd {
-                    Ok(mut child) => {
-                        self.child_pid = Some(child.id());
-                        self.running = true;
-                        let (tx, rx) = mpsc::channel::<TermMsg>();
-                        let mut out = child.stdout.take().expect("stdout");
-                        let mut err = child.stderr.take().expect("stderr");
-                        let tx_out = tx.clone();
-                        thread::spawn(move || {
-                            use std::io::BufRead;
-                            let reader = std::io::BufReader::new(&mut out);
-                            for line in reader.lines().map_while(Result::ok) {
-                                if tx_out.send((0u8, line)).is_err() {
-                                    break;
-                                }
-                            }
-                        });
-                        let tx_err = tx.clone();
-                        thread::spawn(move || {
-                            use std::io::BufRead;
-                            let reader = std::io::BufReader::new(&mut err);
-                            for line in reader.lines().map_while(Result::ok) {
-                                if tx_err.send((1u8, line)).is_err() {
-                                    break;
-                                }
-                            }
-                        });
-                        let mut child = child;
-                        thread::spawn(move || {
-                            let code = child.wait().ok().and_then(|s| s.code());
-                            let _ = tx.send((2u8, format!("{:?}", code.unwrap_or(-1))));
-                        });
-                        self.term_rx = Some(rx);
-                    }
-                    Err(e) => {
-                        self.term.lines.push(TermLine::Err(format!("spawn failed: {e}")));
-                        self.running = false;
-                    }
-                }
+                let args = vec!["-c".to_string(), shell_cmd];
+                let dir = self.cwd.clone();
+                self.spawn_pipeline("sh", &args, &dir, false);
             }
         }
     }
@@ -801,44 +745,6 @@ impl App {
         }
     }
 
-    /// Advance the incremental find-in-files scan by a small slice per frame.
-    pub fn step_scan(&mut self, ctx: &egui::Context) {
-        let Some(mut scan) = self.palette.as_mut().and_then(|p| p.scan.take()) else {
-            return;
-        };
-        let query = self.palette.as_ref().map(|p| p.query.clone()).unwrap_or_default();
-        if query.len() < 2 {
-            return;
-        }
-        let q = query.to_lowercase();
-        let budget = 24;
-        let mut done = 0;
-        while scan.pos < scan.queue.len() && done < budget {
-            let id = scan.queue[scan.pos];
-            scan.pos += 1;
-            done += 1;
-            let Ok(text) = self.project.read_file(id) else { continue };
-            if text.len() > 1_000_000 {
-                continue;
-            }
-            for (i, line) in text.lines().enumerate() {
-                if line.to_lowercase().contains(&q) {
-                    scan.results.push((id, i + 1, line.trim().to_string()));
-                    if scan.results.len() >= 300 {
-                        scan.pos = scan.queue.len();
-                        break;
-                    }
-                }
-            }
-        }
-        let still_scanning = scan.pos < scan.queue.len();
-        if let Some(p) = self.palette.as_mut() {
-            p.scan = Some(scan);
-        }
-        if still_scanning || done == budget {
-            ctx.request_repaint();
-        }
-    }
 }
 
 fn now_stamp() -> String {
@@ -1192,256 +1098,7 @@ impl eframe::App for App {
             });
 
         // modals
-        modals(self, ctx);
-    }
-}
-
-fn modals(app: &mut App, ctx: &egui::Context) {
-    if app.open_dialog.is_some() {
-        let mut commit: Option<String> = None;
-        let mut close = false;
-        egui::Window::new("Open Folder")
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, -40.0])
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.set_min_width(420.0);
-                ui.label(egui::RichText::new("Project folder path:").color(theme::TEXT2));
-                let mut open_now = false;
-                let Some(dialog) = app.open_dialog.as_mut() else { return };
-                let field = ui.add_sized(
-                    [ui.available_width(), 24.0],
-                    egui::TextEdit::singleline(&mut dialog.path),
-                );
-                ui.horizontal(|ui| {
-                    if ui.button("Open").clicked() {
-                        open_now = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                    ui.weak("~ expands to your home directory");
-                });
-                if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    open_now = true;
-                }
-                if !app.recent.is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Recent").small().color(theme::TEXT3));
-                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-                        let recents = app.recent.clone();
-                        for r in recents {
-                            if ui
-                                .add(egui::Button::new(
-                                    egui::RichText::new(r.clone()).size(12.0).color(theme::TEXT2),
-                                ))
-                                .clicked()
-                            {
-                                commit = Some(r);
-                            }
-                        }
-                    });
-                }
-                if open_now && commit.is_none() {
-                    let p = dialog.path.trim().to_string();
-                    if !p.is_empty() {
-                        commit = Some(p);
-                    }
-                }
-            });
-        if let Some(p) = commit {
-            app.open_dialog = None;
-            app.open_project_dir(&p);
-        } else if close {
-            app.open_dialog = None;
-        }
-    }
-    if app.palette.is_some() {
-        palette_ui(app, ctx);
-    }
-    if app.about_open {
-        egui::Window::new("About CodeCraft")
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.set_min_width(320.0);
-                ui.vertical_centered(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(0.0, 34.0), egui::Sense::hover());
-                    icons::logo(ui.painter(), rect.center(), theme::FOLDER);
-                    ui.add_space(4.0);
-                    ui.label(egui::RichText::new("CodeCraft").size(17.0).strong().color(theme::TEXT));
-                    ui.label(egui::RichText::new("Version 1.0.0").color(theme::TEXT2));
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new("A personal IDE inspired by JetBrains IntelliJ IDEA.\nBuilt with Rust + egui.")
-                            .color(theme::TEXT2),
-                    );
-                    ui.add_space(8.0);
-                    if ui.button("OK").clicked() {
-                        app.about_open = false;
-                    }
-                });
-            });
-    }
-    if app.shortcuts_open {
-        egui::Window::new("Keyboard Shortcuts")
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.set_min_width(330.0);
-                let rows = [
-                    ("Ctrl+N", "New file"),
-                    ("Ctrl+B", "Toggle project sidebar"),
-                    ("Ctrl+`", "Toggle bottom panel"),
-                    ("Shift+F10", "Run"),
-                    ("Shift+F9", "Debug"),
-                    ("Esc", "Cancel / close"),
-                ];
-                egui::Grid::new("shortcuts_grid").spacing([16.0, 4.0]).show(ui, |ui| {
-                    for (k, v) in rows {
-                        ui.label(egui::RichText::new(k).monospace().color(theme::SYN_KW));
-                        ui.label(egui::RichText::new(v).color(theme::TEXT2));
-                        ui.end_row();
-                    }
-                });
-                ui.add_space(6.0);
-                if ui.button("Close").clicked() {
-                    app.shortcuts_open = false;
-                }
-            });
-    }
-}
-
-/// Quick-open (Ctrl+P) / find-in-files (Ctrl+Shift+F) overlay.
-fn palette_ui(app: &mut App, ctx: &egui::Context) {
-    let mut close = false;
-    let mut activate = false;
-    egui::Window::new(match app.palette.as_ref().map(|p| p.mode) {
-        Some(PaletteMode::Search) => "Find in Project",
-        _ => "Go to File",
-    })
-    .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
-    .collapsible(false)
-    .resizable(false)
-    .default_width(560.0)
-    .show(ctx, |ui| {
-        let Some(palette) = app.palette.as_mut() else { return };
-        let field = ui.add_sized(
-            [ui.available_width(), 26.0],
-            egui::TextEdit::singleline(&mut palette.query)
-                .hint_text(match palette.mode {
-                    PaletteMode::Files => "type a file name…",
-                    PaletteMode::Search => "search text across the project…",
-                }),
-        );
-        if !field.has_focus() {
-            field.request_focus();
-        }
-        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            activate = true;
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close = true;
-        }
-
-        match palette.mode {
-            PaletteMode::Files => {
-                // fuzzy subsequence filter over project files
-                let q = palette.query.to_lowercase();
-                let files: Vec<Id> = app.project.walk_files();
-                let mut scored: Vec<(usize, Id)> = files
-                    .into_iter()
-                    .filter_map(|id| {
-                        let name = app.project.nodes[id].name.to_lowercase();
-                        if q.is_empty() {
-                            return Some((0, id));
-                        }
-                        // subsequence match with a small score
-                        let mut qi = q.chars().peekable();
-                        let mut score = 0;
-                        for (i, ch) in name.chars().enumerate() {
-                            if qi.peek() == Some(&ch) {
-                                qi.next();
-                                score += i;
-                                if qi.peek().is_none() {
-                                    break;
-                                }
-                            }
-                        }
-                        (qi.peek().is_none()).then_some((score, id))
-                    })
-                    .collect();
-                scored.sort_by_key(|(s, _)| *s);
-                let list: Vec<Id> = scored.into_iter().map(|(_, id)| id).take(40).collect();
-                palette.files = list.clone();
-                if palette.selected >= list.len() {
-                    palette.selected = list.len().saturating_sub(1);
-                }
-                egui::ScrollArea::vertical().max_height(320.0).auto_shrink(false).show(ui, |ui| {
-                    for (i, &id) in list.iter().enumerate() {
-                        let path = app.project.path_of(id);
-                        let selected = i == palette.selected;
-                        let label = egui::RichText::new(path).size(12.5).color(if selected {
-                            theme::TEXT
-                        } else {
-                            theme::TEXT2
-                        });
-                        if ui.add(egui::Button::new(label).fill(if selected { theme::HOVER } else { egui::Color32::TRANSPARENT })).clicked() {
-                            palette.selected = i;
-                            activate = true;
-                        }
-                    }
-                });
-            }
-            PaletteMode::Search => {
-                let (n, pos, total) = match &palette.scan {
-                    Some(s) => (s.results.len(), s.pos, s.queue.len()),
-                    None => (0, 0, 0),
-                };
-                ui.weak(format!("{n} results — scanning {pos}/{total}"));
-                let results: Vec<(Id, usize, String)> = match &palette.scan {
-                    Some(s) => s.results.clone(),
-                    None => Vec::new(),
-                };
-                egui::ScrollArea::vertical().max_height(320.0).auto_shrink(false).show(ui, |ui| {
-                    for (i, (id, line_no, text)) in results.iter().enumerate() {
-                        let path = format!("{}:{}", app.project.path_of(*id), line_no);
-                        let label = format!("{path}  {text}");
-                        if ui
-                            .add(egui::Button::new(egui::RichText::new(label).size(11.5).color(theme::TEXT2)).fill(egui::Color32::TRANSPARENT))
-                            .clicked()
-                        {
-                            palette.selected = i;
-                            activate = true;
-                        }
-                    }
-                });
-            }
-        }
-    });
-    let _ = close;
-    if activate {
-        if let Some(palette) = app.palette.take() {
-            match palette.mode {
-                PaletteMode::Files => {
-                    if let Some(&id) = palette.files.get(palette.selected) {
-                        app.open_file(id);
-                    }
-                }
-                PaletteMode::Search => {
-                    if let Some((id, line_no, _)) = palette.scan.as_ref().and_then(|s| s.results.get(palette.selected)) {
-                        let id = *id;
-                        app.open_file(id);
-                        app.cur_line.insert(id, *line_no);
-                        app.scroll_to_cursor = true;
-                    } else {
-                        app.palette = Some(palette);
-                    }
-                }
-            }
-        }
+        dialogs::modals(self, ctx);
     }
 }
 
@@ -1449,4 +1106,3 @@ fn load_icon(bytes: &[u8]) -> egui::IconData {
     let img = image::load_from_memory(bytes).expect("icon").to_rgba8();
     egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }
 }
-
