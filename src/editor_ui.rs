@@ -1,13 +1,17 @@
 // Multi-tab code editor: line numbers, active line, folding, syntax colors.
+// Since the engine build-out, the code view is a real editable TextEdit with
+// the syntax colorizer applied through a custom layouter.
 use eframe::egui;
-use crate::icons::{self, Chev};
+use crate::icons;
 use crate::project::{ft_of, Ft};
 use crate::theme::*;
 use crate::App;
-use egui::{Align2, Color32, FontFamily, FontId, Pos2, Sense, Vec2};
+use egui::{Color32, FontFamily, FontId, Pos2, Sense, Vec2};
 
 const ROW_H: f32 = 20.0;
 const FONT_SIZE: f32 = 13.2;
+/// Files above this size render without syntax coloring to stay smooth.
+const HIGHLIGHT_CAP: usize = 200_000;
 
 #[derive(Clone, Copy)]
 pub struct Tok {
@@ -37,6 +41,7 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
     let tabs = app.open_tabs.clone();
     for (i, &id) in tabs.iter().enumerate() {
         let name = app.project.nodes[id].name.clone();
+        let dirty = app.buffers.get(&id).map(|b| b.dirty).unwrap_or(false);
         let active = app.active == Some(id);
         let name_w = p
             .layout_no_wrap(name.clone(), mono.clone(), TEXT)
@@ -60,21 +65,26 @@ fn tabs_bar(app: &mut App, ui: &mut egui::Ui) {
         icons::badge(p, Pos2::new(trect.left() + 15.0, trect.center().y), ft_of(&name), false);
         p.text(
             Pos2::new(trect.left() + 26.0, trect.center().y),
-            Align2::LEFT_CENTER,
-            &name,
-            mono.clone(),
+            egui::Align2::LEFT_CENTER,
+            name.clone(),
+            FontId::new(12.0, FontFamily::Proportional),
             if active { TEXT } else { TEXT2 },
         );
-
-        // close button
-        let xc = Pos2::new(trect.right() - 14.0, trect.center().y);
-        let xr = egui::Rect::from_center_size(xc, Vec2::splat(16.0));
-        let xresp = ui.interact(xr, egui::Id::new("tabx").with(i), Sense::click());
-        let xcol = if xresp.hovered() { TEXT } else { TEXT3 };
-        if xresp.hovered() {
-            p.circle_filled(xc, 7.0, if active { HOVER } else { SEL_BG });
+        // modified dot
+        if dirty {
+            p.circle_filled(Pos2::new(trect.right() - 24.0, trect.center().y), 2.6, ACCENT);
         }
-        icons::x_mark(p, xc, 3.2, xcol);
+        // close X
+        let xr = egui::Rect::from_center_size(
+            Pos2::new(trect.right() - 12.0, trect.center().y),
+            Vec2::splat(14.0),
+        );
+        let xresp = ui.interact(xr, egui::Id::new("tabx").with(i), Sense::click());
+        let xcolor = if xresp.hovered() { TEXT } else { TEXT3 };
+        let cx = xr.center();
+        let d = 3.2;
+        p.line_segment([Pos2::new(cx.x - d, cx.y - d), Pos2::new(cx.x + d, cx.y + d)], egui::Stroke::new(1.4, xcolor));
+        p.line_segment([Pos2::new(cx.x - d, cx.y + d), Pos2::new(cx.x + d, cx.y - d)], egui::Stroke::new(1.4, xcolor));
         if xresp.clicked() {
             app.close_tab(id);
         } else if hover_resp.clicked() && !xresp.hovered() {
@@ -96,164 +106,121 @@ fn code_view(app: &mut App, ui: &mut egui::Ui) {
                 empty_state(ui);
                 return;
             };
-            let lines: Vec<String> = match &app.project.nodes[id].content {
-                Some(c) => c.clone(),
-                None => Vec::new(),
-            };
+            // Make sure a buffer exists for the active tab (open_file usually did).
+            if !app.buffers.contains_key(&id) {
+                let text = app.project.read_file(id).unwrap_or_default();
+                app.buffers.insert(id, crate::Buffer { text, dirty: false });
+            }
             let ft = ft_of(&app.project.nodes[id].name);
-            let toks = tokens_for(ft, &lines);
 
+            // gutter metrics
+            let probe = ui.painter();
             let mono = FontId::monospace(FONT_SIZE);
-            let p0 = ui.painter();
-            let cw = char_width(p0, &mono);
-            let digits = (lines.len().max(1)).to_string().len().max(2);
-            let gutter_w = 14.0 + digits as f32 * cw + 16.0;
-            let max_text_w = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as f32 * cw;
-            let total_w = gutter_w + max_text_w + 40.0;
-            let total_h = lines.len() as f32 * ROW_H + 24.0;
+            let cw = char_width(probe, &mono);
+            let line_count = app.buffer_text(id).lines().count().max(1);
+            let digits = line_count.to_string().len().max(2);
+            let gutter_w = 14.0 + digits as f32 * cw + 14.0;
 
-            let (rect, resp) =
-                ui.allocate_exact_size(Vec2::new(total_w.max(ui.available_width()), total_h), Sense::click());
-            let p = &ui.painter_at(rect);
-            p.rect_filled(rect, 0.0, EDITOR_BG);
+            // cursor line for gutter highlight
+            let cur_line = app.cur_line.get(&id).copied().unwrap_or(1).min(line_count);
 
-            let cur_line = {
-                let e = app.cur_line.entry(id).or_insert(1);
-                *e = (*e).min(lines.len().max(1));
-                *e
-            };
-
-            // active line highlight
-            if !lines.is_empty() {
-                let y = rect.top() + 8.0 + (cur_line - 1) as f32 * ROW_H;
-                p.rect_filled(
-                    egui::Rect::from_min_size(
-                        Pos2::new(rect.left(), y),
-                        Vec2::new(rect.width(), ROW_H),
-                    ),
+            ui.horizontal(|ui| {
+                // ---- gutter ----
+                let gutter_h = (line_count as f32 * ROW_H + 20.0).max(ui.available_height() - 8.0);
+                let (grect, _) = ui.allocate_exact_size(Vec2::new(gutter_w, gutter_h), Sense::hover());
+                let gp = ui.painter_at(grect);
+                gp.rect_filled(grect, 0.0, EDITOR_BG);
+                let y = grect.top() + 4.0 + (cur_line - 1) as f32 * ROW_H;
+                gp.rect_filled(
+                    egui::Rect::from_min_size(Pos2::new(grect.left(), y), Vec2::new(grect.width(), ROW_H)),
                     0.0,
                     ACTIVE_LINE,
                 );
-            }
-
-            // fold ranges
-            let ranges = fold_ranges(&lines);
-            let folded: std::collections::HashSet<usize> = ranges
-                .iter()
-                .filter(|&&(s, _)| *app.folds.get(&(id, s)).unwrap_or(&false))
-                .map(|&(s, _)| s)
-                .collect();
-            if let Some(collapse) = app.fold_action.take() {
-                for &(s, _) in &ranges {
-                    app.folds.insert((id, s), collapse);
-                }
-            }
-            let hidden: std::collections::HashSet<usize> = ranges
-                .iter()
-                .filter(|&&(s, _)| folded.contains(&s))
-                .flat_map(|&(s, e)| (s + 1)..=e)
-                .collect();
-
-            // gutter numbers + code
-            let mut row_rects: Vec<(usize, egui::Rect)> = Vec::new();
-            for (i, line) in lines.iter().enumerate() {
-                let li = i + 1;
-                if hidden.contains(&i) {
-                    continue;
-                }
-                let y = rect.top() + 8.0 + i as f32 * ROW_H;
-                let cy = y + ROW_H / 2.0;
-                let is_cur = li == cur_line;
-                p.text(
-                    Pos2::new(rect.left() + gutter_w - 12.0 - cw * 1.0, cy),
-                    Align2::RIGHT_CENTER,
-                    li.to_string(),
-                    mono.clone(),
-                    if is_cur { GUTTER_NUM_CUR } else { GUTTER_NUM },
-                );
-                // fold chevron
-                if ranges.iter().any(|&(s, _)| s == i) {
-                    let cc = Pos2::new(rect.left() + gutter_w - 4.0, cy);
-                    let collapsed = folded.contains(&i);
-                    icons::chevron(
-                        p,
-                        cc,
-                        4.5,
-                        if collapsed { TEXT2 } else { TEXT3 },
-                        if collapsed { Chev::Right } else { Chev::Down },
-                    );
-                    row_rects.push((
-                        i,
-                        egui::Rect::from_center_size(cc, Vec2::splat(14.0)),
-                    ));
-                }
-                // tokens
-                let line_toks = toks.get(i).cloned().unwrap_or_default();
-                let tx = rect.left() + gutter_w + 6.0;
-                if line_toks.is_empty() {
-                    if !line.is_empty() {
-                        p.text(Pos2::new(tx, cy), Align2::LEFT_CENTER, line.clone(), mono.clone(), SYN_PLAIN);
-                    }
-                } else {
-                    for t in &line_toks {
-                        if t.s >= line.chars().count() {
-                            continue;
-                        }
-                        let seg: String = line.chars().skip(t.s).take(t.e - t.s).collect();
-                        p.text(
-                            Pos2::new(tx + t.s as f32 * cw, cy),
-                            Align2::LEFT_CENTER,
-                            seg,
-                            mono.clone(),
-                            t.c,
-                        );
-                    }
-                }
-                // folded placeholder
-                if folded.contains(&i) {
-                    let end = ranges.iter().find(|&&(s, _)| s == i).map(|&(_, e)| e).unwrap_or(i);
-                    let dots_x = tx + line.chars().count() as f32 * cw + 6.0;
-                    p.text(
-                        Pos2::new(dots_x, cy),
-                        Align2::LEFT_CENTER,
-                        format!("… +{} lines", end - i),
+                for i in 1..=line_count {
+                    let cy = grect.top() + 4.0 + (i - 1) as f32 * ROW_H + ROW_H / 2.0;
+                    gp.text(
+                        Pos2::new(grect.right() - 8.0, cy),
+                        egui::Align2::RIGHT_CENTER,
+                        i.to_string(),
                         mono.clone(),
-                        FOLD_DOTS,
+                        if i == cur_line { GUTTER_NUM_CUR } else { GUTTER_NUM },
                     );
                 }
-            }
 
-            // interactions
-            if resp.clicked() {
-                if let Some(pos) = resp.interact_pointer_pos() {
-                    let rel = (pos.y - rect.top() - 8.0) / ROW_H;
-                    let ln = (rel.floor() as usize + 1).clamp(1, lines.len().max(1));
-                    app.cur_line.insert(id, ln);
+                // ---- editable text ----
+                let Some(buf) = app.buffers.get_mut(&id) else { return };
+                let text = buf.text.clone();
+                let mut layouter =
+                    |ui: &egui::Ui, src: &dyn egui::TextBuffer, _wrap: f32| {
+                        let job = highlight_job(ui, src.as_str(), ft);
+                        ui.fonts(|f| f.layout_job(job))
+                    };
+                let out = egui::TextEdit::multiline(&mut buf.text)
+                    .id(egui::Id::new("editor").with(id))
+                    .font(egui::TextStyle::Name("editor".into()))
+                    .desired_width(ui.available_width())
+                    .frame(false)
+                    .layouter(&mut layouter)
+                    .show(ui);
+
+                // track cursor line
+                if let Some(cursor) = out.cursor_range {
+                    let idx = cursor.primary.index;
+                    let line = text[..idx.min(text.len())].matches('\n').count() + 1;
+                    app.cur_line.insert(id, line);
                 }
-                app.term_focus = false;
-            }
-            for (i, cr) in row_rects {
-                let r = ui.interact(cr, egui::Id::new("fold").with(id).with(i), Sense::click());
-                if r.clicked() {
-                    let e = app.folds.entry((id, i)).or_insert(false);
-                    *e = !*e;
+                if out.response.changed() {
+                    app.mark_dirty(id, true);
                 }
-                if r.hovered() {
-                    let hp = ui.painter_at(rect);
-                    hp.circle_filled(cr.center(), 7.0, HOVER);
-                    let collapsed = folded.contains(&i);
-                    icons::chevron(
-                        &hp,
-                        cr.center(),
-                        4.5,
-                        TEXT,
-                        if collapsed { Chev::Right } else { Chev::Down },
-                    );
+                if app.scroll_to_cursor {
+                    app.scroll_to_cursor = false;
+                    out.response.scroll_to_me(Some(egui::Align::Center));
                 }
-            }
+            });
         });
 }
 
+/// Syntax-colored LayoutJob for the editor text; falls back to plain text for
+/// very large files.
+fn highlight_job(ui: &egui::Ui, text: &str, ft: Ft) -> egui::text::LayoutJob {
+    let _ = ui;
+    let mut job = egui::text::LayoutJob::default();
+    let mono = FontId::monospace(FONT_SIZE);
+    if text.len() > HIGHLIGHT_CAP {
+        job.append(text, 0.0, egui::TextFormat::simple(mono, SYN_PLAIN));
+        return job;
+    }
+    // Tokenize the visible file. tokens_for works per line and tracks
+    // block-comment state across lines, so feed the whole text at once.
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let toks = tokens_for(ft, &lines);
+    for (i, line) in lines.iter().enumerate() {
+        let line_toks = toks.get(i).cloned().unwrap_or_default();
+        if line_toks.is_empty() {
+            job.append(line.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+        } else {
+            let mut pos = 0usize;
+            for t in &line_toks {
+                if t.s > pos {
+                    let seg: String = line.chars().skip(pos).take(t.s - pos).collect();
+                    job.append(seg.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+                }
+                if t.e > t.s {
+                    let seg: String = line.chars().skip(t.s).take(t.e - t.s).collect();
+                    job.append(seg.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), t.c));
+                }
+                pos = pos.max(t.e);
+            }
+            if pos < line.chars().count() {
+                let seg: String = line.chars().skip(pos).collect();
+                job.append(seg.as_str(), 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+            }
+        }
+        // newline keeps the job text identical to the buffer text
+        job.append("\n", 0.0, egui::TextFormat::simple(mono.clone(), SYN_PLAIN));
+    }
+    job
+}
 fn empty_state(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() * 0.35);

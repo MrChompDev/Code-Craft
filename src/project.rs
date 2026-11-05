@@ -636,7 +636,7 @@ impl Project {
         };
         let keep_paths: Vec<(Id, String)> = keep
             .iter()
-            .filter_map(|&id| self.disk_path(&id).map(|p| (id, p.to_string_lossy().to_string())))
+            .filter_map(|&id| self.disk_path(id).map(|p| (id, p.to_string_lossy().to_string())))
             .collect();
         if let Ok(fresh) = Self::open_disk(&root) {
             for (old, path) in keep_paths {
@@ -668,7 +668,7 @@ impl Project {
         }
     }
 
-    pub fn write_file(&self, id: Id, body: &str) -> std::io::Result<()> {
+    pub fn write_file(&mut self, id: Id, body: &str) -> std::io::Result<()> {
         match self.disk_path(id) {
             Some(p) => fs::write(p, body),
             None => {

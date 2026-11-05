@@ -4,7 +4,7 @@ use egui::FontFamily;
 use crate::icons;
 use crate::project::Id;
 use crate::theme::*;
-use crate::{date_string, BottomTab, LogLevel, TermLine, App};
+use crate::{BottomTab, LogLevel, TermLine, App};
 use egui::{Align2, Color32, FontId, Pos2, Sense, Vec2};
 
 pub fn draw(app: &mut App, ui: &mut egui::Ui) {

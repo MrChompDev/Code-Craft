@@ -39,7 +39,7 @@ pub fn menu_bar(app: &mut App, ui: &mut egui::Ui) {
                 ui.menu_button("Open Recent", |ui| {
                     let recents = app.recent.clone();
                     for r in recents {
-                        if ui.button(egui::RichText::new(r).size(12.0)).clicked() {
+                        if ui.button(egui::RichText::new(r.clone()).size(12.0)).clicked() {
                             app.open_project_dir(&r);
                             ui.close_menu();
                         }

@@ -11,7 +11,7 @@ use eframe::egui;
 use project::{Id, Project};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::sync::mpsc::Receiver;
@@ -500,13 +500,13 @@ impl App {
             .stderr(std::process::Stdio::piped())
             .spawn();
         match cmd {
-            Ok(child) => {
+            Ok(mut child) => {
                 self.child_pid = Some(child.id());
                 self.running = true;
                 let (tx, rx) = mpsc::channel::<TermMsg>();
                 // stdout + stderr readers + an exit waiter
-                let mut out = child.stdout.expect("stdout");
-                let mut err = child.stderr.expect("stderr");
+                let mut out = child.stdout.take().expect("stdout");
+                let mut err = child.stderr.take().expect("stderr");
                 let tx_out = tx.clone();
                 thread::spawn(move || {
                     use std::io::BufRead;
@@ -687,12 +687,12 @@ impl App {
                     .stderr(std::process::Stdio::piped())
                     .spawn();
                 match cmd {
-                    Ok(child) => {
+                    Ok(mut child) => {
                         self.child_pid = Some(child.id());
                         self.running = true;
                         let (tx, rx) = mpsc::channel::<TermMsg>();
-                        let mut out = child.stdout.expect("stdout");
-                        let mut err = child.stderr.expect("stderr");
+                        let mut out = child.stdout.take().expect("stdout");
+                        let mut err = child.stderr.take().expect("stderr");
                         let tx_out = tx.clone();
                         thread::spawn(move || {
                             use std::io::BufRead;
