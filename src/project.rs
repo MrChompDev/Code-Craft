@@ -697,10 +697,7 @@ impl Project {
         match self.disk_path(id) {
             Some(p) => {
                 let target = p.with_file_name(new_name);
-                fs::rename(&p, &target).map_err(|e| {
-                    eprintln!("DBG rename {:?} -> {:?}: {:?}", p, target, e);
-                    e
-                })
+                fs::rename(p, target)
             }
             None => Ok(()),
         }
@@ -796,12 +793,9 @@ mod tests {
         p.create_entry(p.root, "notes.txt", false).unwrap();
         assert!(dir.path().join("notes.txt").is_file());
         let id = p.add(p.root, "notes.txt", false, None);
-        // rename
-        println!("disk_path(id) = {:?}", p.disk_path(id));
-        println!("exists: {:?}", dir.path().join("notes.txt").exists());
-        println!("root_path: {:?}", p.root_path);
-        println!("path_of(id) = {:?}", p.path_of(id));
+        // rename on disk, then keep the tree in sync (as commit_pending does)
         p.rename_entry(id, "notes.md").unwrap();
+        p.nodes[id].name = "notes.md".into();
         assert!(!dir.path().join("notes.txt").exists());
         assert!(dir.path().join("notes.md").is_file());
         // delete
