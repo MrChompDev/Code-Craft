@@ -1,5 +1,7 @@
 // Project tree model + demo content.
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub type Id = usize;
 
@@ -43,6 +45,9 @@ pub fn ft_of(name: &str) -> Ft {
 pub struct Project {
     pub nodes: Vec<Node>,
     pub root: Id,
+    /// When set, the tree mirrors a real directory on disk and every
+    /// mutation writes through to the filesystem.
+    pub root_path: Option<PathBuf>,
 }
 
 impl Project {
@@ -499,6 +504,7 @@ impl Project {
                 content: None,
             }],
             root: 0,
+            root_path: None,
         };
         let src = p.add(0, "src", true, None);
         p.add(src, "main.js", false, Some(MAIN_JS));
@@ -545,5 +551,168 @@ impl Project {
             items.insert(name, n.is_dir);
         }
         items.into_keys().collect()
+    }
+}
+
+// ---------------- real filesystem layer ----------------
+// When `root_path` is set the tree mirrors a directory on disk: opening a
+// file reads its bytes, mutations write through, and refresh resyncs.
+
+impl Project {
+    /// Directories never scanned into the tree.
+    fn skip_dir(name: &str) -> bool {
+        matches!(name, ".git" | "target" | "node_modules" | "__pycache__" | ".idea" | ".vscode" | "dist" | "build")
+            || (name.starts_with('.') && name != ".github")
+    }
+
+    /// Open a real directory: scan it into the tree. Content is loaded lazily
+    /// per file by the editor, so large projects cost nothing up front.
+    pub fn open_disk(root: &Path) -> std::io::Result<Self> {
+        let name = root
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| root.to_string_lossy().to_string());
+        let mut p = Project {
+            nodes: vec![Node {
+                name,
+                is_dir: true,
+                parent: None,
+                children: Vec::new(),
+                content: None,
+            }],
+            root: 0,
+            root_path: Some(root.to_path_buf()),
+        };
+        p.scan_dir(0, root)?;
+        Ok(p)
+    }
+
+    fn scan_dir(&mut self, parent: Id, dir: &Path) -> std::io::Result<()> {
+        let mut entries: Vec<_> = fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if e.path().is_dir() {
+                    !Self::skip_dir(&name)
+                } else {
+                    true
+                }
+            })
+            .collect();
+        entries.sort_by_key(|e| (e.path().is_file(), e.file_name()));
+
+        for e in entries {
+            let name = e.file_name().to_string_lossy().to_string();
+            let path = e.path();
+            let is_dir = path.is_dir();
+            let id = self.add(parent, &name, is_dir, None);
+            if is_dir {
+                self.scan_dir(id, &path)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Absolute path of a node on disk (only meaningful when root_path is set).
+    pub fn disk_path(&self, id: Id) -> Option<PathBuf> {
+        self.root_path.as_ref().map(|root| {
+            let rel = self.path_of(id);
+            // path_of starts with the root folder's own name; strip it.
+            let rel = rel.split_once('/').map(|(_, r)| r).unwrap_or("");
+            if rel.is_empty() {
+                root.clone()
+            } else {
+                root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR))
+            }
+        })
+    }
+
+    /// Rescan from disk, keeping `keep` node ids alive by relative path.
+    /// Returns a map old_id -> new_id for surviving nodes.
+    pub fn refresh(&mut self, keep: &[Id]) -> std::collections::HashMap<Id, Id> {
+        let mut mapping = std::collections::HashMap::new();
+        let Some(root) = self.root_path.clone() else {
+            return mapping;
+        };
+        let keep_paths: Vec<(Id, String)> = keep
+            .iter()
+            .filter_map(|&id| self.disk_path(&id).map(|p| (id, p.to_string_lossy().to_string())))
+            .collect();
+        if let Ok(fresh) = Self::open_disk(&root) {
+            for (old, path) in keep_paths {
+                for (i, n) in fresh.nodes.iter().enumerate() {
+                    if !n.is_dir {
+                        if let Some(dp) = fresh.disk_path(i) {
+                            if dp.to_string_lossy() == path {
+                                mapping.insert(old, i);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            *self = fresh;
+        }
+        mapping
+    }
+
+    pub fn read_file(&self, id: Id) -> std::io::Result<String> {
+        match self.disk_path(id) {
+            Some(p) => fs::read_to_string(p),
+            // demo project: content is stored inline
+            None => Ok(self.nodes[id]
+                .content
+                .as_ref()
+                .map(|l| l.join("\n"))
+                .unwrap_or_default()),
+        }
+    }
+
+    pub fn write_file(&self, id: Id, body: &str) -> std::io::Result<()> {
+        match self.disk_path(id) {
+            Some(p) => fs::write(p, body),
+            None => {
+                // demo project: update in-memory content only
+                self.nodes[id].content = Some(body.lines().map(|l| l.to_string()).collect());
+                Ok(())
+            }
+        }
+    }
+
+    pub fn create_entry(&self, parent: Id, name: &str, is_dir: bool) -> std::io::Result<()> {
+        match self.disk_path(parent) {
+            Some(p) => {
+                let target = p.join(name);
+                if is_dir {
+                    fs::create_dir(target)
+                } else {
+                    fs::write(target, "")
+                }
+            }
+            None => Ok(()), // demo: tree add alone is enough
+        }
+    }
+
+    pub fn rename_entry(&self, id: Id, new_name: &str) -> std::io::Result<()> {
+        match self.disk_path(id) {
+            Some(p) => {
+                let target = p.with_file_name(new_name);
+                fs::rename(p, target)
+            }
+            None => Ok(()),
+        }
+    }
+
+    pub fn delete_entry(&self, id: Id) -> std::io::Result<()> {
+        match self.disk_path(id) {
+            Some(p) => {
+                if p.is_dir() {
+                    fs::remove_dir_all(p)
+                } else {
+                    fs::remove_file(p)
+                }
+            }
+            None => Ok(()),
+        }
     }
 }
