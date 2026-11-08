@@ -7,6 +7,7 @@ description = "CodeCraft - a personal IntelliJ-inspired IDE"
 [dependencies]
 eframe = { version = "0.32", features = ["default"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 
 [dev-dependencies]
 tempfile = "3"

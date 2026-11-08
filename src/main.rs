@@ -28,12 +28,6 @@ pub struct Buffer {
 /// Background terminal job output. 0 = stdout, 1 = stderr, 2 = exit status line.
 pub type TermMsg = (u8, String);
 
-/// "Open Folder" dialog state.
-pub struct OpenDialog {
-    pub path: String,
-    pub error: Option<String>,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BottomTab {
     Terminal,
@@ -133,7 +127,8 @@ pub struct App {
     pub term_rx: Option<Receiver<TermMsg>>,
     /// Background cargo build output feeding the Build tab.
     pub build_rx: Option<Receiver<TermMsg>>,
-    pub open_dialog: Option<OpenDialog>,
+    /// Native folder-picker result channel (rfd runs on a worker thread).
+    pub folder_rx: Option<Receiver<Option<PathBuf>>>,
     pub palette: Option<Palette>,
     /// Recently opened project folders, newest first (persisted).
     pub recent: Vec<String>,
@@ -292,6 +287,20 @@ impl App {
                 self.bottom_tab = BottomTab::Build;
             }
         }
+    }
+
+    /// Show the platform folder-picker (VS Code style) and open the choice.
+    /// The dialog runs on a worker thread; the result arrives via `folder_rx`.
+    pub fn open_folder_dialog(&mut self) {
+        if self.folder_rx.is_some() {
+            return; // a picker is already open
+        }
+        let (tx, rx) = mpsc::channel::<Option<PathBuf>>();
+        self.folder_rx = Some(rx);
+        thread::spawn(move || {
+            let picked = rfd::FileDialog::new().pick_folder();
+            let _ = tx.send(picked);
+        });
     }
 
     fn settings_dir() -> Option<PathBuf> {
@@ -788,6 +797,8 @@ impl App {
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
                         self.term_rx = None;
+                        self.running = false;
+                        self.child_pid = None;
                         break;
                     }
                 }
@@ -1025,7 +1036,7 @@ impl App {
             running: false,
             about_open: false,
             shortcuts_open: false,
-            term_focus: true,
+            term_focus: initial_tab == root,
             pending: None,
             term,
             build_log,
@@ -1036,7 +1047,7 @@ impl App {
             child_pid: None,
             term_rx: None,
             build_rx: None,
-            open_dialog: None,
+            folder_rx: None,
             palette: None,
             recent: recents,
             title_dirty: true,
@@ -1072,6 +1083,20 @@ impl eframe::App for App {
             return;
         }
 
+        // native folder picker result → open project
+        if let Some(rx) = &self.folder_rx {
+            match rx.try_recv() {
+                Ok(Some(path)) => {
+                    self.folder_rx = None;
+                    let p = path.to_string_lossy().to_string();
+                    self.open_project_dir(&p);
+                }
+                Ok(None) => self.folder_rx = None, // user cancelled
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => self.folder_rx = None,
+            }
+        }
+
         // background job output → panels
         self.drain_jobs(ctx);
         self.step_scan(ctx);
@@ -1096,6 +1121,7 @@ impl eframe::App for App {
                 self.save_all();
             }
             if ctrl && i.key_pressed(egui::Key::P) && !i.modifiers.shift {
+                self.term_focus = false;
                 self.palette = Some(Palette {
                     mode: PaletteMode::Files,
                     query: String::new(),
@@ -1105,6 +1131,7 @@ impl eframe::App for App {
                 });
             }
             if ctrl && i.key_pressed(egui::Key::F) && i.modifiers.shift {
+                self.term_focus = false;
                 self.palette = Some(Palette {
                     mode: PaletteMode::Search,
                     query: String::new(),
@@ -1135,7 +1162,6 @@ impl eframe::App for App {
                 self.term_focus = false;
                 self.pending = None;
                 self.palette = None;
-                self.open_dialog = None;
             }
         });
 

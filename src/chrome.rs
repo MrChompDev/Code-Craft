@@ -36,10 +36,7 @@ pub fn menu_bar(app: &mut App, ui: &mut egui::Ui) {
             }
             ui.separator();
             if item(ui, "Open Folder…", "") {
-                app.open_dialog = Some(crate::OpenDialog {
-                    path: String::new(),
-                    error: None,
-                });
+                app.open_folder_dialog();
             }
             if !app.recent.is_empty() {
                 ui.menu_button("Open Recent", |ui| {

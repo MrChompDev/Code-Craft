@@ -220,6 +220,10 @@ fn code_view(app: &mut App, ui: &mut egui::Ui) {
             if out.response.changed() {
                 app.mark_dirty(id, true);
             }
+            // clicking the editor moves keyboard focus out of the terminal
+            if out.response.clicked() {
+                app.term_focus = false;
+            }
             if app.scroll_to_cursor {
                 app.scroll_to_cursor = false;
                 out.response.scroll_to_me(Some(egui::Align::Center));
